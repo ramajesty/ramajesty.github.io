@@ -18,6 +18,7 @@ create table if not exists public.folders (
   updated_at timestamptz not null default now(),
   deleted_at timestamptz
 );
+alter table public.folders enable row level security;
 
 create table if not exists public.documents (
   id           uuid primary key default gen_random_uuid(),
@@ -30,6 +31,7 @@ create table if not exists public.documents (
   updated_at   timestamptz not null default now(),
   deleted_at   timestamptz
 );
+alter table public.documents enable row level security;
 
 create table if not exists public.nodes (
   id          uuid primary key default gen_random_uuid(),
@@ -43,11 +45,12 @@ create table if not exists public.nodes (
   checked     boolean not null default false,
   collapsed   boolean not null default false,
   due_at      timestamptz,
-  tags        text[] not null default '{}',
+  tags        text[] not null default array[]::text[],
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   deleted_at  timestamptz
 );
+alter table public.nodes enable row level security;
 
 create table if not exists public.attachments (
   id           uuid primary key default gen_random_uuid(),
@@ -63,6 +66,7 @@ create table if not exists public.attachments (
   created_at   timestamptz not null default now(),
   deleted_at   timestamptz
 );
+alter table public.attachments enable row level security;
 
 -- ============================================================
 -- インデックス
@@ -99,13 +103,8 @@ create trigger documents_updated_at before update on public.documents for each r
 create trigger nodes_updated_at     before update on public.nodes     for each row execute function public.set_updated_at();
 
 -- ============================================================
--- アクセス制限(RLS): 本人の行だけ読み書きできる
+-- アクセス制限(RLS): 本人の行だけ読み書きできる(RLS 自体は各表の作成直後でオン)
 -- ============================================================
-
-alter table public.folders     enable row level security;
-alter table public.documents   enable row level security;
-alter table public.nodes       enable row level security;
-alter table public.attachments enable row level security;
 
 drop policy if exists "own rows" on public.folders;
 drop policy if exists "own rows" on public.documents;
