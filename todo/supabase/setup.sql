@@ -88,12 +88,7 @@ create index if not exists attachments_node_idx  on public.attachments (node_id)
 -- ============================================================
 
 create or replace function public.set_updated_at() returns trigger
-language plpgsql as $$
-begin
-  new.updated_at := now();
-  return new;
-end;
-$$;
+language plpgsql as 'begin new.updated_at := now(); return new; end;';
 
 drop trigger if exists folders_updated_at   on public.folders;
 drop trigger if exists documents_updated_at on public.documents;
@@ -149,19 +144,19 @@ create policy "attachments own files delete" on storage.objects for delete to au
 -- リアルタイム同期の対象に追加
 -- ============================================================
 
-do $$
+do '
 declare t text;
 begin
-  foreach t in array array['folders', 'documents', 'nodes'] loop
+  foreach t in array array[''folders'', ''documents'', ''nodes''] loop
     if not exists (
       select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+      where pubname = ''supabase_realtime'' and schemaname = ''public'' and tablename = t
     ) then
-      execute format('alter publication supabase_realtime add table public.%I', t);
+      execute format(''alter publication supabase_realtime add table public.%I'', t);
     end if;
   end loop;
 end;
-$$;
+';
 
 -- 完了確認用: 4行(attachments, documents, folders, nodes)が表示されれば成功
 select table_name from information_schema.tables
