@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Outline Todo</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Todo">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="app.css">
+<script src="vendor/supabase.js"></script>
+<script type="module" src="js/main.js"></script>
+</head>
+<body>
+<div id="login" hidden></div>
+
+<div id="app" hidden>
+  <aside id="sidebar">
+    <div class="side-head">
+      <span class="side-app">Outline Todo</span>
+    </div>
+    <div class="side-actions">
+      <button id="new-doc" class="btn small" type="button">＋ ドキュメント</button>
+      <button id="new-folder" class="btn small" type="button">＋ フォルダ</button>
+    </div>
+    <nav id="tree"></nav>
+    <div class="side-foot">
+      <span id="user-email"></span>
+      <button id="logout" class="link-btn" type="button">ログアウト</button>
+    </div>
+  </aside>
+  <div id="scrim"></div>
+
+  <main id="main">
+    <header id="topbar">
+      <button id="menu-btn" class="icon-btn" type="button" aria-label="メニュー">☰</button>
+      <nav id="crumbs"></nav>
+      <span id="status" data-state="saved">保存済み</span>
+      <button id="toggle-checked" class="btn small" type="button">完了を隠す</button>
+    </header>
+    <div id="page">
+      <h1 id="title" class="title"></h1>
+      <div id="title-note" class="title-note" hidden></div>
+      <div id="outline"></div>
+    </div>
+  </main>
+
+  <div id="toolbar" hidden></div>
+</div>
+</body>
+</html>
