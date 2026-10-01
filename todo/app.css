@@ -219,6 +219,7 @@ button { font: inherit; color: inherit; }
 .popup-menu {
   position: fixed; z-index: 40; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
   box-shadow: var(--shadow); padding: 4px; min-width: 200px; display: flex; flex-direction: column;
+  max-height: calc(100vh - 16px); overflow-y: auto;
 }
 .popup-item { border: 0; background: none; text-align: left; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 .popup-item:hover { background: var(--bg-hover); }
@@ -249,6 +250,20 @@ button { font: inherit; color: inherit; }
   cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
 }
 .tb-btn:active { background: var(--bg-hover); }
+#toolbar .tb-sel { display: none; }
+#toolbar.selecting .tb-sel { display: inline-flex; align-items: center; justify-content: center; }
+#toolbar.selecting .tb-edit { display: none; }
+.tb-count { flex: none; padding: 0 10px; font-size: 13px; color: var(--accent); font-weight: 600; white-space: nowrap; }
+@media (pointer: fine) {
+  #toolbar.selecting { left: 50%; right: auto; bottom: 16px; transform: translateX(-50%) !important; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; }
+}
+
+/* ---------- 複数選択 */
+.node.selected > .row { background: var(--accent-soft); border-radius: 4px; }
+.node.selected > .kids { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+.selecting #outline { -webkit-user-select: none; user-select: none; }
+.selecting #outline .content, .selecting #outline .note { caret-color: transparent; }
+.sel-sink { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; }
 
 /* ---------- スマホ */
 #scrim { display: none; }

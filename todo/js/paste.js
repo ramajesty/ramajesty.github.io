@@ -88,7 +88,14 @@ function singleLink(html, text) {
   return linkText(a.textContent, a.getAttribute('href'));
 }
 
+export const CLIP_MIME = 'application/x-outline-todo';
+
 export function parseClipboard(dt) {
+  // このアプリ内でコピーしたものは、メモ・チェック状態も含めてそのまま使う
+  try {
+    const own = JSON.parse(dt.getData(CLIP_MIME) || 'null');
+    if (Array.isArray(own) && own.length) return own;
+  } catch {}
   const html = dt.getData('text/html');
   const text = dt.getData('text/plain') || '';
   const fromList = fromHtml(html);

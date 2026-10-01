@@ -54,6 +54,8 @@ export function initOutline(opts) {
     el.addEventListener('click', onClick);
   }
   outline.addEventListener('contextmenu', onContextMenu);
+  setupPointerSelection(outline);
+  document.addEventListener('selectstart', (e) => { if (sel && ui.outline.contains(e.target)) e.preventDefault(); });
   setupLongPress(outline);
   setupDragDrop();
   document.addEventListener('selectionchange', () => {
@@ -193,6 +195,7 @@ function applySnap(id, s) {
 }
 
 export function undo() {
+  if (sel) { sel = null; paintSelection(); }
   commitText();
   const op = history.pop();
   if (!op) return;
@@ -203,6 +206,7 @@ export function undo() {
 }
 
 export function redo() {
+  if (sel) { sel = null; paintSelection(); }
   commitText();
   const op = future.pop();
   if (!op) return;
@@ -345,6 +349,7 @@ function renderAll() {
   ui.outline.classList.toggle('hide-checked', !doc.show_checked);
   for (const c of childrenOf(zoomId)) ui.outline.append(buildEl(c));
   renderTitle();
+  if (sel) paintSelection();
   const ids = [];
   for (const id of els.keys()) {
     const n = nodes.get(id);
@@ -707,7 +712,7 @@ function duplicate(id) {
   focusNode(m.id);
 }
 
-async function moveToDocument(id) {
+async function moveToDocument(ids) {
   const options = library.docOptions().filter((o) => o.value !== doc.id);
   if (!options.length) { toast('移動先のドキュメントがありません'); return; }
   const targetId = await choose('移動先のドキュメント', options);
@@ -721,19 +726,24 @@ async function moveToDocument(id) {
     toast('移動先を読み込めませんでした');
     return;
   }
-  const next = neighbor(id, 1) ?? neighbor(id, -1);
+  const next = neighbor(ids.at(-1), 1) ?? neighbor(ids[0], -1);
+  sel = null;
   begin();
-  const n = nodes.get(id);
-  const oldParent = n.parent_id;
-  for (const d of subtree(id)) set(d.id, { document_id: targetId });
-  set(id, { parent_id: null, sort_key: generateKeyBetween(lastKey, null) });
-  reindex();
-  place(n);
-  paint(nodes.get(oldParent));
+  for (const id of ids) {
+    const n = nodes.get(id);
+    const oldParent = n.parent_id;
+    for (const d of subtree(id)) set(d.id, { document_id: targetId });
+    lastKey = generateKeyBetween(lastKey, null);
+    set(id, { parent_id: null, sort_key: lastKey });
+    reindex();
+    place(n);
+    paint(nodes.get(oldParent));
+  }
   ensureNotEmpty();
   commit();
-  toast(`「${library.docTitle(targetId)}」へ移動しました`);
-  if (next && !isInside(next, id)) focusNode(next);
+  paintSelection();
+  toast(`「${library.docTitle(targetId)}」へ${ids.length > 1 ? `${ids.length}項目を` : ''}移動しました`);
+  if (next && !ids.some((id) => isInside(next, id))) focusNode(next);
 }
 
 // 複数行の貼り付け: 1行目はキャレット位置に、2行目以降は階層を保って下に項目として追加
@@ -749,6 +759,7 @@ function pasteItems(id, items) {
   set(id, {
     content: n.content.slice(0, Math.min(c.start, c.end)) + items[0].text,
     ...('checkbox' in items[0] && !n.content && flags(items[0])),
+    ...(items[0].note && !n.note && { note: items[0].note }),
   });
   repaintText(n);
   // parents[k] = 深さ k の直近の項目。深さ0の1つ目は今の項目そのもの
@@ -767,7 +778,7 @@ function pasteItems(id, items) {
       parentId = p.id;
       index = childrenOf(p.id).length;
     }
-    const m = create({ parent_id: parentId, sort_key: slotKey(parentId, index), content: it.text, ...flags(it) });
+    const m = create({ parent_id: parentId, sort_key: slotKey(parentId, index), content: it.text, note: it.note ?? '', ...flags(it) });
     reindex();
     place(m);
     parents[it.level] = m;
@@ -781,6 +792,302 @@ function pasteItems(id, items) {
   const pos = last.content.length - tail.length;
   commit({ id: last.id, field: 'content', offset: pos });
   focusNode(last.id, pos);
+}
+
+// ============================================================ 複数選択
+
+let sel = null; // { anchor, focus }: 表示順で anchor〜focus の範囲を選択
+let sink = null; // 選択中にキー入力・コピーを受け取る見えない入力欄
+const CLIP_MIME = 'application/x-outline-todo';
+
+function selectedIds() {
+  if (!sel) return [];
+  const v = visibleIds();
+  let a = v.indexOf(sel.anchor);
+  let b = v.indexOf(sel.focus);
+  if (a < 0 || b < 0) return [];
+  if (a > b) [a, b] = [b, a];
+  return v.slice(a, b + 1);
+}
+
+// 選択の中で、親が選択されていない項目(子は親と一緒に扱う)
+function selectedRoots() {
+  const ids = selectedIds();
+  const set = new Set(ids);
+  return ids.filter((id) => !ancestors(id).some((a) => set.has(a.id)));
+}
+
+function paintSelection() {
+  for (const el of ui.outline.querySelectorAll('.node.selected')) el.classList.remove('selected');
+  const ids = selectedIds();
+  if (sel && !ids.length) sel = null;
+  for (const id of ids) els.get(id)?.el.classList.add('selected');
+  document.body.classList.toggle('selecting', !!sel);
+  ui.onSelection?.(sel ? ids.length : 0);
+}
+
+export const isSelecting = () => !!sel;
+
+function startSelection(anchor, focus = anchor) {
+  commitText();
+  sel = { anchor, focus };
+  focusSink();
+  paintSelection();
+}
+
+export function clearSelection(focusId) {
+  if (!sel) return;
+  const f = focusId === undefined ? sel.focus : focusId;
+  sel = null;
+  paintSelection();
+  if (f && els.get(f)) focusNode(f);
+  else sink?.blur();
+}
+
+function focusSink() {
+  if (!sink) {
+    sink = h('textarea', { class: 'sel-sink', readonly: true, inputmode: 'none', tabindex: '-1', 'aria-label': '選択中の項目' });
+    sink.addEventListener('keydown', onSelKeyDown);
+    sink.addEventListener('copy', (e) => onCopy(e, false));
+    sink.addEventListener('cut', (e) => onCopy(e, true));
+    sink.addEventListener('paste', (e) => { e.preventDefault(); const last = selectedIds().at(-1); clearSelection(last); });
+    sink.addEventListener('blur', () => {
+      // 選択以外の場所をクリックしたら選択を解除
+      setTimeout(() => { if (sel && document.activeElement !== sink && !document.querySelector('.popup-menu, .modal-overlay')) { sel = null; paintSelection(); } }, 0);
+    });
+    document.body.append(sink);
+  }
+  sink.value = '選択中';
+  sink.focus({ preventScroll: true });
+  sink.select();
+}
+
+function extendSelection(id) {
+  if (!sel) return;
+  sel.focus = id;
+  paintSelection();
+  els.get(id)?.row.scrollIntoView({ block: 'nearest' });
+  if (document.activeElement !== sink) focusSink();
+}
+
+function onSelKeyDown(e) {
+  if (!sel || e.isComposing) return;
+  const k = e.key;
+  const mod = modKey(e);
+  const stop = () => { e.preventDefault(); e.stopPropagation(); };
+  if (k === 'Escape') { stop(); clearSelection(); return; }
+  if ((k === 'ArrowUp' || k === 'ArrowDown') && e.shiftKey && !mod) {
+    stop();
+    const v = visibleIds();
+    const next = v[v.indexOf(sel.focus) + (k === 'ArrowUp' ? -1 : 1)];
+    if (next) extendSelection(next);
+    return;
+  }
+  if ((k === 'ArrowUp' || k === 'ArrowDown') && mod) { stop(); selectionAction(k === 'ArrowUp' ? 'up' : 'down'); return; }
+  if (k === 'ArrowUp' || k === 'ArrowDown') { stop(); const ids = selectedIds(); clearSelection(k === 'ArrowUp' ? ids[0] : ids.at(-1)); return; }
+  if (k === 'Tab') { stop(); selectionAction(e.shiftKey ? 'outdent' : 'indent'); return; }
+  if (k === 'Backspace' || k === 'Delete') { stop(); selectionAction('delete'); return; }
+  if (k === 'Enter' && mod && e.shiftKey) { stop(); selectionAction('checkbox'); return; }
+  if (k === 'Enter' && mod) { stop(); selectionAction('check'); return; }
+  if (k === 'Enter') { stop(); clearSelection(); return; }
+  if (mod && k.toLowerCase() === 'z') { stop(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && k.toLowerCase() === 'y') { stop(); redo(); return; }
+  if (mod && k.toLowerCase() === 'a') { stop(); const v = visibleIds(); sel = { anchor: v[0], focus: v.at(-1) }; paintSelection(); return; }
+  if (mod && ['c', 'x', 'v'].includes(k.toLowerCase())) return; // copy / cut / paste イベントで処理
+  if (!mod && !e.altKey && k.length === 1) { stop(); clearSelection(); }
+}
+
+// 複数の項目を、順番を保ったまま parentId の index 番目以降へ移す
+function moveRootsTo(ids, parentId, indexFn) {
+  ids.forEach((id, i) => {
+    const index = i === 0 ? indexFn() : idxEx(nodes.get(ids[i - 1]), id) + 1;
+    moveNode(id, parentId, index);
+  });
+}
+
+export function selectionAction(action) {
+  if (!sel) return;
+  const roots = selectedRoots();
+  if (!roots.length) return;
+  const first = nodes.get(roots[0]);
+  const last = nodes.get(roots.at(-1));
+  if (action === 'copy' || action === 'cut') {
+    focusSink();
+    if (!document.execCommand(action)) toast('コピーできませんでした。Ctrl+C を使ってください');
+    return;
+  }
+  if (action === 'move-doc') { moveToDocument(roots); return; }
+  if (action === 'delete') {
+    const next = neighbor(selectedIds().at(-1), 1) ?? neighbor(selectedIds()[0], -1);
+    sel = null;
+    begin();
+    for (const id of roots) deleteSubtree(id);
+    ensureNotEmpty();
+    commit();
+    paintSelection();
+    const t = next && !roots.some((r) => isInside(next, r)) ? next : visibleIds()[0];
+    if (t) focusNode(t); else sink?.blur();
+    return;
+  }
+  if (action === 'check' || action === 'checkbox') {
+    const ids = selectedIds();
+    const field = action === 'check' ? 'checked' : 'checkbox';
+    const value = !ids.every((id) => nodes.get(id)[field]);
+    begin();
+    for (const id of ids) { set(id, { [field]: value }); paint(nodes.get(id)); }
+    commit();
+    if (action === 'check' && value && !doc.show_checked) { sel = null; paintSelection(); sink?.blur(); }
+    else paintSelection();
+    return;
+  }
+  begin();
+  if (action === 'indent') {
+    const moved = new Set();
+    for (const id of roots) {
+      const n = nodes.get(id);
+      const sibs = visibleChildren(n.parent_id);
+      const prev = sibs[sibs.indexOf(n) - 1];
+      if (!prev || (roots.includes(prev.id) && !moved.has(prev.id))) continue;
+      expand(prev.id);
+      moveNode(id, prev.id, childrenOf(prev.id).filter((c) => c.id !== id).length);
+      moved.add(id);
+    }
+  } else if (action === 'outdent') {
+    for (const id of [...roots].reverse()) {
+      const p = nodes.get(nodes.get(id).parent_id);
+      if (!p || p.id === zoomId) continue;
+      moveNode(id, p.parent_id, idxEx(p, id) + 1);
+    }
+  } else if (action === 'up' || action === 'down') {
+    if (roots.some((id) => nodes.get(id).parent_id !== first.parent_id)) {
+      tx = null;
+      toast('同じ階層の項目だけをまとめて上下に移動できます');
+      return;
+    }
+    const all = visibleChildren(first.parent_id);
+    const parent = nodes.get(first.parent_id);
+    if (action === 'up') {
+      const target = all[all.indexOf(first) - 1];
+      if (target) moveRootsTo(roots, first.parent_id, () => idxEx(target, roots[0]));
+      else if (parent && parent.id !== zoomId) moveRootsTo(roots, parent.parent_id, () => idxEx(parent, roots[0]));
+    } else {
+      const target = all[all.indexOf(last) + 1];
+      if (target) moveRootsTo(roots, first.parent_id, () => idxEx(target, roots[0]) + 1);
+      else if (parent && parent.id !== zoomId) moveRootsTo(roots, parent.parent_id, () => idxEx(parent, roots[0]) + 1);
+    }
+  }
+  commit();
+  paintSelection();
+  focusSink();
+}
+
+// ---------- コピー・切り取り
+
+function plainForClipboard(text) {
+  return text.replace(ATT_RE, '[添付]');
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function htmlForClipboard(text) {
+  let out = '';
+  let last = 0;
+  const t = plainForClipboard(text);
+  for (const m of t.matchAll(MD_LINK_RE)) {
+    out += escapeHtml(t.slice(last, m.index)) + `<a href="${escapeHtml(m[2])}">${escapeHtml(m[1])}</a>`;
+    last = m.index + m[0].length;
+  }
+  return out + escapeHtml(t.slice(last));
+}
+
+function clipboardItems(roots) {
+  const items = [];
+  const walk = (id, level) => {
+    const n = nodes.get(id);
+    items.push({ level, text: n.content, note: n.note, checkbox: n.checkbox, checked: n.checked });
+    for (const c of childrenOf(id)) walk(c.id, level + 1);
+  };
+  const depth = (id) => ancestors(id).length;
+  const base = Math.min(...roots.map(depth));
+  for (const id of roots) walk(id, depth(id) - base);
+  return items;
+}
+
+function onCopy(e, cut) {
+  if (!sel) return;
+  e.preventDefault();
+  const roots = selectedRoots();
+  const items = clipboardItems(roots);
+  const plain = items.map((it) => `${'    '.repeat(it.level)}- ${plainForClipboard(it.text)}`).join('\n');
+  let html = '';
+  let level = -1;
+  for (const it of items) {
+    if (it.level > level) html += '<ul>'.repeat(it.level - level);
+    else html += '</li>' + '</ul></li>'.repeat(level - it.level);
+    html += '<li>' + (it.checkbox ? `<input type="checkbox"${it.checked ? ' checked' : ''}> ` : '') + htmlForClipboard(it.text);
+    level = it.level;
+  }
+  html += '</li>' + '</ul></li>'.repeat(level) + '</ul>';
+  e.clipboardData.setData('text/plain', plain);
+  e.clipboardData.setData('text/html', html);
+  e.clipboardData.setData(CLIP_MIME, JSON.stringify(items));
+  if (cut) selectionAction('delete');
+  else toast(`${items.length}項目をコピーしました`, 1500);
+}
+
+function showSelectionMenu(x, y) {
+  const n = selectedIds().length;
+  popupMenu(x, y, [
+    { label: `${n}項目を選択中`, action: () => {} },
+    { label: '完了 / 未完了', action: () => selectionAction('check') },
+    { label: 'チェックボックスを付ける / 消す', action: () => selectionAction('checkbox') },
+    { label: 'コピー', action: () => selectionAction('copy') },
+    { label: '切り取り', action: () => selectionAction('cut') },
+    { label: '別のドキュメントへ移動', action: () => selectionAction('move-doc') },
+    { label: '削除', danger: true, action: () => selectionAction('delete') },
+    { label: '選択をやめる', action: () => clearSelection() },
+  ]);
+}
+
+// ---------- マウス・タッチでの選択
+
+function setupPointerSelection(outline) {
+  let drag = null;
+  outline.addEventListener('pointerdown', (e) => {
+    const nodeEl = e.target.closest?.('.node');
+    if (!nodeEl || e.button !== 0) return;
+    const id = nodeEl.dataset.id;
+    // スマホの選択中: タップで範囲を広げる
+    if (sel && e.pointerType !== 'mouse') {
+      if (e.target.closest('.bullet')) return;
+      e.preventDefault();
+      extendSelection(id);
+      return;
+    }
+    // Shift+クリックで範囲選択
+    if (e.shiftKey && e.pointerType === 'mouse') {
+      const anchor = sel?.anchor ?? currentFocus()?.id ?? lastFocus?.id;
+      if (anchor && anchor !== zoomId && nodes.get(anchor)) {
+        e.preventDefault();
+        if (sel) extendSelection(id); else startSelection(anchor, id);
+        return;
+      }
+    }
+    if (sel && !e.target.closest('.bullet')) { sel = null; paintSelection(); }
+    if (e.pointerType === 'mouse' && e.target.closest('.content, .note')) drag = { start: id };
+  });
+  addEventListener('pointermove', (e) => {
+    if (!drag || !(e.buttons & 1)) return;
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('#outline .node');
+    if (!over) return;
+    const id = over.dataset.id;
+    if (!sel && id === drag.start) return;
+    if (!sel) { getSelection().removeAllRanges(); startSelection(drag.start, id); }
+    else if (sel.focus !== id) extendSelection(id);
+  });
+  addEventListener('pointerup', () => { drag = null; });
 }
 
 // ============================================================ 添付の挿入
@@ -941,6 +1248,16 @@ function onKeyDown(e) {
     return;
   }
 
+  if ((k === 'ArrowUp' || k === 'ArrowDown') && e.shiftKey && !mod && !e.altKey) {
+    // 文字の選択がもう広げられない端でさらに Shift+↑↓ を押したら、項目単位の選択に切り替える
+    const c = getCaret(t.el);
+    const atEdge = c && (k === 'ArrowUp' ? Math.min(c.start, c.end) === 0 : Math.max(c.start, c.end) === nodes.get(id)[field].length);
+    if (atEdge) {
+      stop();
+      startSelection(id, neighbor(id, k === 'ArrowUp' ? -1 : 1) ?? id);
+    }
+    return;
+  }
   if ((k === 'ArrowUp' || k === 'ArrowDown') && !e.shiftKey && !mod && !e.altKey) {
     const dir = k === 'ArrowUp' ? -1 : 1;
     if (!caretOnEdgeLine(t.el, dir)) return;
@@ -1053,6 +1370,7 @@ export function pickFiles(target) {
 }
 
 function showNodeMenu(id, x, y) {
+  if (sel && selectedIds().includes(id)) return showSelectionMenu(x, y);
   const n = nodes.get(id);
   popupMenu(x, y, [
     { label: n.checked ? '未完了に戻す' : '完了にする', action: () => toggleChecked(id) },
@@ -1061,7 +1379,8 @@ function showNodeMenu(id, x, y) {
     { label: 'ファイルを添付', action: () => pickFiles({ id, field: 'content', offset: null }) },
     { label: 'ズーム', action: () => zoomTo(id) },
     { label: '複製', action: () => duplicate(id) },
-    { label: '別のドキュメントへ移動', action: () => moveToDocument(id) },
+    { label: '複数選択', action: () => startSelection(id) },
+    { label: '別のドキュメントへ移動', action: () => moveToDocument([id]) },
     { label: '削除', danger: true, action: () => deleteNode(id) },
   ]);
 }
@@ -1073,12 +1392,15 @@ function setupDragDrop() {
   const indicator = h('div', { class: 'drop-indicator', hidden: true });
   page.append(indicator);
   let dragId = null;
+  let dragRoots = [];
   let drop = null;
 
   outline.addEventListener('dragstart', (e) => {
     const bullet = e.target.closest?.('.bullet');
     if (!bullet) return;
     dragId = bullet.closest('.node').dataset.id;
+    const roots = sel ? selectedRoots() : [];
+    dragRoots = roots.includes(dragId) ? roots : [dragId];
     e.dataTransfer.setData('text/plain', plain(nodes.get(dragId).content));
     e.dataTransfer.effectAllowed = 'move';
     els.get(dragId)?.el.classList.add('dragging');
@@ -1096,7 +1418,7 @@ function setupDragDrop() {
     if (!dragId) { e.dataTransfer.dropEffect = 'copy'; return; }
     const row = e.target.closest?.('.row');
     const nodeEl = row?.closest('.node');
-    if (!row || !ui.outline.contains(row) || isInside(nodeEl.dataset.id, dragId)) {
+    if (!row || !ui.outline.contains(row) || dragRoots.some((r) => isInside(nodeEl.dataset.id, r))) {
       indicator.hidden = true; drop = null; return;
     }
     const tid = nodeEl.dataset.id;
@@ -1131,13 +1453,14 @@ function setupDragDrop() {
     if (!drop) return;
     const { tid, mode } = drop;
     const tn = nodes.get(tid);
-    const id = dragId;
+    const ids = dragRoots;
     begin();
-    if (mode === 'before') moveNode(id, tn.parent_id, idxEx(tn, id));
-    else if (mode === 'after') moveNode(id, tn.parent_id, idxEx(tn, id) + 1);
-    else if (mode === 'first-child') moveNode(id, tid, 0);
-    else { expand(tid); moveNode(id, tid, childrenOf(tid).filter((c) => c.id !== id).length); }
+    if (mode === 'before') moveRootsTo(ids, tn.parent_id, () => idxEx(tn, ids[0]));
+    else if (mode === 'after') moveRootsTo(ids, tn.parent_id, () => idxEx(tn, ids[0]) + 1);
+    else if (mode === 'first-child') moveRootsTo(ids, tid, () => 0);
+    else { expand(tid); moveRootsTo(ids, tid, () => childrenOf(tid).filter((c) => c.id !== ids[0]).length); }
     commit();
+    paintSelection();
     drop = null;
   });
 }

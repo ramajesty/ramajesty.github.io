@@ -92,6 +92,7 @@ export function popupMenu(x, y, items) {
     })));
   document.body.append(menu);
   const r = menu.getBoundingClientRect();
+  if (!Number.isFinite(x) || !Number.isFinite(y)) { x = (innerWidth - r.width) / 2; y = (innerHeight - r.height) / 2; }
   menu.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px';
   menu.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
   const off = (e) => {
