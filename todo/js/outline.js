@@ -5,8 +5,9 @@ import {
 } from './util.js';
 import {
   renderInto, serialize, getCaret, setCaret, focusAt, focusAtX, caretOnEdgeLine, caretX,
-  attIds, marker, ATT_RE,
+  attIds, marker, ATT_RE, MD_LINK_RE, hasMdLink,
 } from './content.js';
+import { parseClipboard } from './paste.js';
 import { ensureLoaded, startUpload, handleChipClick } from './attachments.js';
 
 const SNAP_FIELDS = ['document_id', 'parent_id', 'sort_key', 'content', 'note', 'checkbox', 'checked', 'collapsed', 'deleted_at'];
@@ -44,6 +45,7 @@ export function initOutline(opts) {
     el.addEventListener('input', onInput);
     el.addEventListener('paste', onPaste);
     el.addEventListener('focusout', onFocusOut);
+    el.addEventListener('focusin', onFocusIn);
     el.addEventListener('compositionend', () => { lastCompositionEnd = Date.now(); });
     el.addEventListener('pointerdown', (e) => {
       const field = e.target.closest?.('.content, .note, .title, .title-note');
@@ -371,7 +373,7 @@ function renderTitle() {
 }
 
 function plain(text) {
-  return text.replace(ATT_RE, '📎').trim() || '(空の項目)';
+  return text.replace(ATT_RE, '📎').replace(MD_LINK_RE, '$1').trim() || '(空の項目)';
 }
 
 function renderCrumbs() {
@@ -734,47 +736,48 @@ async function moveToDocument(id) {
   if (next && !isInside(next, id)) focusNode(next);
 }
 
-// 複数行の貼り付け: 1行目はキャレット位置に、2行目以降は下に項目として追加
-function pasteLines(id, lines) {
+// 複数行の貼り付け: 1行目はキャレット位置に、2行目以降は階層を保って下に項目として追加
+function pasteItems(id, items) {
   const n = nodes.get(id);
   const el = fieldEl(id, 'content');
   const c = getCaret(el) ?? { start: n.content.length, end: n.content.length };
-  const parse = (l) => {
-    const m = /^([ \t]*)(?:[-*•・]\s+|\d+[.)]\s+)?(.*)$/.exec(l);
-    return { indent: m[1].replace(/\t/g, '    ').length, text: m[2] };
-  };
-  const items = lines.map(parse);
   begin();
   const tail = n.content.slice(Math.max(c.start, c.end));
-  set(id, { content: n.content.slice(0, Math.min(c.start, c.end)) + items[0].text });
+  // チェックボックスの有無が書かれていればそれに従い、書かれていない行は付けない。全く書かれていなければ今の項目に合わせる
+  const fallback = items.some((it) => 'checkbox' in it) ? false : n.checkbox;
+  const flags = (it) => ('checkbox' in it ? { checkbox: it.checkbox, checked: it.checked } : { checkbox: fallback });
+  set(id, {
+    content: n.content.slice(0, Math.min(c.start, c.end)) + items[0].text,
+    ...('checkbox' in items[0] && !n.content && flags(items[0])),
+  });
   repaintText(n);
-  const stack = [{ indent: items[0].indent, node: n }];
+  // parents[k] = 深さ k の直近の項目。深さ0の1つ目は今の項目そのもの
+  const parents = [n];
   let last = n;
   for (const it of items.slice(1)) {
-    while (stack.length > 1 && it.indent < stack.at(-1).indent) stack.pop();
     let parentId;
     let index;
-    const top = stack.at(-1);
-    if (it.indent > top.indent) {
-      parentId = last.id;
-      index = childrenOf(last.id).length;
-      stack.push({ indent: it.indent, node: null });
-    } else {
-      const ref = top.node ?? last;
+    if (it.level === 0) {
+      const ref = parents[0];
       parentId = ref.parent_id;
       index = idxEx(ref) + 1;
+    } else {
+      const p = parents[it.level - 1];
+      if (p.collapsed) expand(p.id);
+      parentId = p.id;
+      index = childrenOf(p.id).length;
     }
-    const m = create({ parent_id: parentId, sort_key: slotKey(parentId, index), checkbox: n.checkbox, content: it.text });
+    const m = create({ parent_id: parentId, sort_key: slotKey(parentId, index), content: it.text, ...flags(it) });
     reindex();
-    stack.at(-1).node = m;
+    place(m);
+    parents[it.level] = m;
+    parents.length = it.level + 1;
     last = m;
   }
-  if (tail) set(last.id, { content: last.content + tail });
-  reindex();
-  for (const d of subtree(n.id).slice(1)) place(d);
-  for (const d of childrenOf(n.parent_id)) place(d);
+  if (tail) { set(last.id, { content: last.content + tail }); repaintText(last); }
   paint(nodes.get(n.parent_id));
   paint(n);
+  for (const p of parents) paint(p);
   const pos = last.content.length - tail.length;
   commit({ id: last.id, field: 'content', offset: pos });
   focusNode(last.id, pos);
@@ -836,6 +839,21 @@ function onInput(e) {
   paint(n);
   if (t.id === zoomId) renderCrumbs();
   commitTextSoon();
+}
+
+// 編集を始めたら [表示名](URL) を元の書き方で見せる(Dynalist と同じ)
+function onFocusIn(e) {
+  const t = eventTarget(e);
+  if (!t || t.field === 'title') return;
+  const n = nodes.get(t.id);
+  if (!n || !hasMdLink(n[t.field])) return;
+  // クリック位置にキャレットが置かれてから差し替える
+  setTimeout(() => {
+    if (document.activeElement !== t.el || !t.el.querySelector('[data-md]')) return;
+    const c = getCaret(t.el);
+    renderInto(t.el, n[t.field], { raw: true });
+    setCaret(t.el, c?.start ?? n[t.field].length);
+  });
 }
 
 function onFocusOut(e) {
@@ -954,15 +972,17 @@ function onPaste(e) {
     insertFiles(files, { id: t.id, field: t.field, offset: getCaret(t.el)?.start ?? null });
     return;
   }
-  let text = dt?.getData('text/plain') ?? '';
-  if (!text) return;
-  text = text.replace(/\r\n?/g, '\n');
-  if (t.field === 'content' && t.id !== zoomId && text.includes('\n')) {
-    const lines = text.split('\n').filter((l) => l.trim() !== '');
-    if (lines.length > 1) return pasteLines(t.id, lines);
-    text = lines[0] ?? '';
+  if (!dt) return;
+  let text;
+  if (t.field === 'note') {
+    text = (dt.getData('text/plain') || '').replace(/\r\n?/g, '\n');
+  } else {
+    const items = parseClipboard(dt);
+    if (!items.length) return;
+    if (items.length > 1 && t.field === 'content' && t.id !== zoomId) return pasteItems(t.id, items);
+    text = items.map((it) => it.text).join(' ');
   }
-  if (t.field !== 'note') text = text.replace(/\n/g, ' ');
+  if (!text) return;
   document.execCommand('insertText', false, text);
 }
 

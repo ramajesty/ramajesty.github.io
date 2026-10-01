@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Clipboard Check</title>
+<style>
+  :root { --bg: #fff; --text: #1f2328; --sub: #6b7076; --box: #f6f6f4; --line: #e3e3df; color-scheme: light; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #1c1c1e; --text: #e6e6e6; --sub: #a0a0a6; --box: #2c2c30; --line: #38383c; color-scheme: dark; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, "Hiragino Sans", "Meiryo", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 16px; }
+  #drop { border: 2px dashed var(--line); border-radius: 8px; padding: 24px; text-align: center; color: var(--sub); outline: none; }
+  h2 { font-size: 14px; margin: 20px 0 6px; }
+  pre { background: var(--box); border: 1px solid var(--line); border-radius: 6px; padding: 10px; white-space: pre-wrap; word-break: break-all; margin: 0; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>クリップボードの中身の確認</h1>
+  <p>Dynalist などでコピーしたあと、下の枠をクリックして Ctrl+V を押してください。空白や改行は記号で表示します(· = 半角スペース, ⍽ = NBSP, □ = 全角スペース, → = タブ)。</p>
+  <div id="drop" tabindex="0">ここをクリックして Ctrl+V</div>
+  <div id="out"></div>
+</main>
+<script>
+  const show = (s) => s.replace(/\t/g, '→').replace(/ /g, '⍽').replace(/　/g, '□').replace(/ /g, '·');
+  document.getElementById('drop').addEventListener('paste', (e) => {
+    e.preventDefault();
+    const out = document.getElementById('out');
+    out.textContent = '';
+    for (const type of e.clipboardData.types) {
+      const h2 = document.createElement('h2');
+      h2.textContent = type;
+      const pre = document.createElement('pre');
+      const v = e.clipboardData.getData(type);
+      pre.textContent = type === 'text/plain' ? show(v) : v;
+      out.append(h2, pre);
+    }
+  });
+</script>
+</body>
+</html>
