@@ -4,6 +4,8 @@ import { h } from './util.js';
 import { makeChip } from './attachments.js';
 
 export const ATT_RE = /\{\{att:([0-9a-f-]{36})\}\}/g;
+// Dynalist と同じ [表示名](URL) 形式のリンク
+export const MD_LINK_RE = /\[([^\[\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
 const URL_RE = /https?:\/\/[^\s<>"'「」、。)）]+/g;
 export const marker = (id) => `{{att:${id}}}`;
 
@@ -11,16 +13,35 @@ export function attIds(text) {
   return [...text.matchAll(ATT_RE)].map((m) => m[1]);
 }
 
-// 本文文字列を el の中身として描画する
-export function renderInto(el, text) {
+export const hasMdLink = (text) => text.search(MD_LINK_RE) >= 0;
+
+// 本文文字列を el の中身として描画する。raw: 編集用に [表示名](URL) をそのまま見せる
+export function renderInto(el, text, { raw = false } = {}) {
   el.textContent = '';
   let last = 0;
   for (const m of text.matchAll(ATT_RE)) {
-    appendText(el, text.slice(last, m.index));
+    appendSegment(el, text.slice(last, m.index), raw);
     el.append(makeChip(m[1]));
     last = m.index + m[0].length;
   }
-  appendText(el, text.slice(last));
+  appendSegment(el, text.slice(last), raw);
+}
+
+function appendSegment(el, s, raw) {
+  if (raw) {
+    if (s) el.append(document.createTextNode(s));
+    return;
+  }
+  let last = 0;
+  for (const m of s.matchAll(MD_LINK_RE)) {
+    appendText(el, s.slice(last, m.index));
+    el.append(h('a', {
+      class: 'link', href: m[2], target: '_blank', rel: 'noopener', contenteditable: 'false',
+      'data-md': m[0], title: m[2], text: m[1],
+    }));
+    last = m.index + m[0].length;
+  }
+  appendText(el, s.slice(last));
 }
 
 function appendText(el, s) {
@@ -34,7 +55,9 @@ function appendText(el, s) {
   if (last < s.length) el.append(document.createTextNode(s.slice(last)));
 }
 
-const isChip = (n) => n.nodeType === 1 && n.classList.contains('att');
+// 添付チップと [表示名](URL) リンクは、1つのかたまり(元の文字列ぶんの長さ)として扱う
+const isChip = (n) => n.nodeType === 1 && (n.classList.contains('att') || n.dataset.md !== undefined);
+const chipText = (n) => (n.dataset.md !== undefined ? n.dataset.md : marker(n.dataset.att));
 const isBlock = (n) => n.nodeType === 1 && (n.tagName === 'DIV' || n.tagName === 'P');
 
 // 編集中の DOM を本文文字列に戻す
@@ -43,7 +66,7 @@ export function serialize(el, { multiline = false } = {}) {
   const walk = (node) => {
     for (const c of node.childNodes) {
       if (c.nodeType === 3) out += c.data;
-      else if (isChip(c)) out += marker(c.dataset.att);
+      else if (isChip(c)) out += chipText(c);
       else if (c.tagName === 'BR') out += multiline ? '\n' : '';
       else {
         if (multiline && isBlock(c) && out && !out.endsWith('\n')) out += '\n';
@@ -68,7 +91,7 @@ function domToOffset(el, container, offset) {
       const c = node.childNodes[i];
       if (c === container && c.nodeType === 3) { found = pos + offset; return; }
       if (c.nodeType === 3) pos += c.data.length;
-      else if (isChip(c)) pos += marker(c.dataset.att).length;
+      else if (isChip(c)) pos += chipText(c).length;
       else if (c.tagName === 'BR') pos += 0;
       else walk(c);
     }
@@ -100,7 +123,7 @@ export function setCaret(el, pos) {
         if (remaining <= c.data.length) { range.setStart(c, remaining); done = true; return; }
         remaining -= c.data.length;
       } else if (isChip(c)) {
-        const len = marker(c.dataset.att).length;
+        const len = chipText(c).length;
         if (remaining === 0) { range.setStartBefore(c); done = true; return; }
         remaining -= len;
         if (remaining <= 0) { range.setStartAfter(c); done = true; return; }

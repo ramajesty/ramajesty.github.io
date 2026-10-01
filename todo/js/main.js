@@ -106,6 +106,7 @@ async function startApp(user) {
     crumbs: $('crumbs'),
     onStatus: setStatus,
     onTitleChange: () => library.render(),
+    onSelection: (count) => onSelectionChange(count),
   });
 
   setupChrome(user);
@@ -202,6 +203,8 @@ function setupChrome(user) {
 
 // ============================================================ スマホ用ツールバー
 
+let onSelectionChange = () => {};
+
 function setupToolbar() {
   const bar = $('toolbar');
   const act = (fn) => () => {
@@ -209,7 +212,7 @@ function setupToolbar() {
     if (!f?.id) return;
     fn(f);
   };
-  const buttons = [
+  const editButtons = [
     ['⇤', 'アウトデント', act((f) => outline.outdent(f.id))],
     ['⇥', 'インデント', act((f) => outline.indent(f.id))],
     ['↑', '上へ移動', act((f) => outline.moveUp(f.id))],
@@ -222,26 +225,48 @@ function setupToolbar() {
     ['↷', 'やり直す', () => outline.redo()],
     ['⌄', '入力を閉じる', () => document.activeElement?.blur()],
   ];
-  for (const [label, title, fn] of buttons) {
-    const b = h('button', { type: 'button', class: 'tb-btn', title, 'aria-label': title, text: label });
+  const sel = (a) => () => outline.selectionAction(a);
+  const selButtons = [
+    ['✕', '選択をやめる', () => outline.clearSelection(null)],
+    ['⇤', 'アウトデント', sel('outdent')],
+    ['⇥', 'インデント', sel('indent')],
+    ['↑', '上へ移動', sel('up')],
+    ['↓', '下へ移動', sel('down')],
+    ['✓', '完了', sel('check')],
+    ['⧉', 'コピー', sel('copy')],
+    ['✂', '切り取り', sel('cut')],
+    ['📄', '別のドキュメントへ移動', sel('move-doc')],
+    ['🗑', '削除', sel('delete')],
+  ];
+  const makeButtons = (list, cls) => list.map(([label, title, fn]) => {
+    const b = h('button', { type: 'button', class: `tb-btn ${cls}`, title, 'aria-label': title, text: label });
     // ボタンを押してもキーボードが閉じないようにフォーカスを奪わせない
     b.addEventListener('pointerdown', (e) => e.preventDefault());
     b.addEventListener('mousedown', (e) => e.preventDefault());
     b.addEventListener('click', fn);
-    bar.append(b);
-  }
+    return b;
+  });
+  const count = h('span', { class: 'tb-count tb-sel' });
+  bar.append(...makeButtons(editButtons, 'tb-edit'), count, ...makeButtons(selButtons, 'tb-sel'));
+
   const editing = () => {
     const a = document.activeElement;
     return !!a && (a.closest?.('#outline') || a.id === 'title-note' || (a.id === 'title' && outline.currentZoom()));
   };
   const update = () => {
-    const show = isTouch() && editing();
+    const selecting = outline.isSelecting();
+    const show = selecting || (isTouch() && editing());
     bar.hidden = !show;
+    bar.classList.toggle('selecting', selecting);
     document.body.classList.toggle('toolbar-shown', show);
     if (!show || !window.visualViewport) return;
     const vv = window.visualViewport;
     const bottom = window.innerHeight - vv.height - vv.offsetTop;
     bar.style.transform = `translateY(${-Math.max(0, bottom)}px)`;
+  };
+  onSelectionChange = (n) => {
+    count.textContent = n ? `${n}項目` : '';
+    update();
   };
   document.addEventListener('focusin', update);
   document.addEventListener('focusout', () => setTimeout(update, 50));
