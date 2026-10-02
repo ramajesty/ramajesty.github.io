@@ -267,8 +267,8 @@ function buildEl(n) {
   const content = makeEditable(h('div', { class: 'content' }));
   const note = makeEditable(h('div', { class: 'note' }));
   const row = h('div', { class: 'row' },
-    h('span', { class: 'toggle', title: '折りたたみ' }),
-    h('span', { class: 'bullet', draggable: isTouch() ? 'false' : 'true', title: 'クリックでズーム' }),
+    h('span', { class: 'zoom-btn', title: 'ズーム', 'aria-label': 'ズーム' }),
+    h('span', { class: 'bullet', draggable: isTouch() ? 'false' : 'true', title: 'クリックで折りたたみ / 展開' }),
     h('span', { class: 'cb', role: 'checkbox' }),
     h('div', { class: 'text' }, content, note));
   const kidsEl = h('div', { class: 'kids' });
@@ -1331,8 +1331,9 @@ function onClick(e) {
   const nodeEl = e.target.closest?.('.node');
   if (!nodeEl) return;
   const id = nodeEl.dataset.id;
-  if (e.target.classList.contains('bullet')) { zoomTo(id); return; }
-  if (e.target.classList.contains('toggle')) { toggleCollapse(id); return; }
+  // 行頭の点は折りたたみ / 展開(Dynalist と同じ)。ズームは左の🔍ボタン
+  if (e.target.classList.contains('bullet')) { toggleCollapse(id); return; }
+  if (e.target.classList.contains('zoom-btn')) { zoomTo(id); return; }
   if (e.target.classList.contains('cb')) { toggleChecked(id); }
 }
 
