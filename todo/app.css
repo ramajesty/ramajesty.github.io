@@ -15,6 +15,7 @@
   --indent: 24px;
   --thumb-h: 48px;
   --side-w: 260px;
+  --icon-zoom: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.75' fill='none' stroke='black' stroke-width='1.8'/%3E%3Cpath d='M10 10l4.5 4.5' stroke='black' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E");
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -135,14 +136,19 @@ button { font: inherit; color: inherit; }
 #outline { outline: none; }
 .node { position: relative; }
 .row { display: flex; align-items: flex-start; position: relative; min-height: 28px; }
-.toggle {
-  position: absolute; left: -22px; top: 3px; width: 20px; height: 20px; display: grid; place-items: center;
-  color: var(--text-faint); cursor: pointer; border-radius: 4px; opacity: 0; font-size: 10px;
+.zoom-btn {
+  position: absolute; left: -24px; top: 4px; width: 20px; height: 20px; border-radius: 4px;
+  cursor: pointer; opacity: 0; color: var(--text-faint);
 }
-.toggle::before { content: "▼"; }
-.collapsed > .row > .toggle::before { content: "▶"; }
-.has-kids > .row:hover > .toggle { opacity: 1; }
-.has-kids > .row > .toggle:hover { background: var(--bg-hover); }
+.zoom-btn::before {
+  content: ""; position: absolute; inset: 3px; background: currentColor;
+  -webkit-mask: var(--icon-zoom) center / contain no-repeat; mask: var(--icon-zoom) center / contain no-repeat;
+}
+.row:hover > .zoom-btn { opacity: 1; }
+.zoom-btn:hover { background: var(--bg-hover); color: var(--accent); }
+.has-kids > .row > .bullet { cursor: pointer; }
+.row > .bullet { cursor: default; }
+@media (pointer: coarse) { .zoom-btn { display: none; } }
 .bullet {
   flex: none; width: 20px; height: 28px; display: grid; place-items: center; cursor: pointer; position: relative; isolation: isolate;
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
@@ -281,8 +287,6 @@ button { font: inherit; color: inherit; }
   .title { font-size: 22px; }
   body { font-size: 16px; }
   .note { font-size: 14px; }
-  .toggle { left: -24px; width: 22px; }
-  .has-kids > .row > .toggle { opacity: 0.8; }
   .row { min-height: 32px; }
   .bullet { width: 24px; height: 32px; }
   .content { min-height: 32px; padding: 4px 0; }
