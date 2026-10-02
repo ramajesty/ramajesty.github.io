@@ -2,6 +2,7 @@ import { h, isTouch, toast } from './util.js';
 import { initAttachments } from './attachments.js';
 import * as outline from './outline.js';
 import * as library from './library.js';
+import { showShortcuts } from './help.js';
 
 const $ = (id) => document.getElementById(id);
 const LAST_DOC_KEY = 'todo.lastDoc';
@@ -179,6 +180,10 @@ function setupChrome(user) {
     setTimeout(() => $('title').focus(), 300);
   };
   $('new-folder').onclick = () => library.newFolder();
+  $('help-btn').onclick = showShortcuts;
+  addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === '/' || e.code === 'Slash')) { e.preventDefault(); showShortcuts(); }
+  });
   $('toggle-checked').onclick = () => {
     const d = outline.currentDoc();
     if (!d) return;
