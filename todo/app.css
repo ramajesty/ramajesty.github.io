@@ -82,7 +82,14 @@ button { font: inherit; color: inherit; }
 }
 .side-head { padding: 14px 14px 6px; font-weight: 600; }
 .side-actions { display: flex; gap: 6px; padding: 6px 12px 10px; }
-#tree { flex: 1; overflow-y: auto; padding: 0 6px 12px; }
+.side-scroll { flex: 1; overflow-y: auto; padding: 0 6px 12px; }
+.side-nav { padding: 0 6px 6px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-icon { width: 18px; text-align: center; font-size: 13px; }
+.side-label { font-size: 12px; color: var(--text-sub); padding: 12px 8px 4px; }
+.tag-item { padding-left: 14px; }
+.tag-count { font-size: 12px; color: var(--text-faint); }
+.side-foot { flex-wrap: wrap; }
 .side-foot {
   border-top: 1px solid var(--line); padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
   font-size: 12px; color: var(--text-sub); display: flex; justify-content: space-between; align-items: center; gap: 8px;
@@ -334,3 +341,59 @@ button { font: inherit; color: inherit; }
 .finder-list { padding-bottom: 10px; }
 .modal-item.active { background: var(--accent-soft); color: var(--accent); }
 .finder-empty { color: var(--text-faint); padding: 8px; font-size: 13px; }
+
+/* ---------- 期日・タグ */
+.due {
+  display: inline-block; font-size: 12px; line-height: 1.6; padding: 0 7px; margin: 0 2px; border-radius: 10px;
+  background: var(--chip); color: var(--text-sub); border: 1px solid var(--line); cursor: pointer;
+  vertical-align: 1px; white-space: nowrap; -webkit-user-select: none; user-select: none;
+}
+.due-overdue { background: color-mix(in srgb, var(--danger) 14%, var(--bg)); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--bg)); }
+.due-today { background: color-mix(in srgb, #e8890c 16%, var(--bg)); color: #c26a00; border-color: color-mix(in srgb, #e8890c 40%, var(--bg)); }
+.due-soon { color: var(--accent); }
+.checked > .row .due { background: none; color: var(--text-faint); border-color: var(--line); }
+.tag { color: var(--accent); cursor: pointer; }
+.tag:hover { text-decoration: underline; }
+.date-input { position: fixed; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; pointer-events: none; }
+.complete-box {
+  position: fixed; z-index: 45; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: var(--shadow); padding: 4px; min-width: 160px; max-width: 260px;
+}
+.complete-item { padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--accent); }
+.complete-item.active, .complete-item:hover { background: var(--accent-soft); }
+@keyframes flash { from { background: color-mix(in srgb, #f5c400 45%, transparent); } to { background: transparent; } }
+.row.flash { animation: flash 1.6s ease-out; border-radius: 4px; }
+
+/* ---------- 検索・期日一覧 */
+#view { max-width: 860px; margin: 0 auto; padding: 8px 40px 30vh; }
+.view-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.view-option { font-size: 13px; color: var(--text-sub); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.search-box { margin: 0 0 12px; }
+.search-input {
+  width: 100%; font: inherit; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text);
+}
+.view-count { font-size: 12px; color: var(--text-faint); margin: 4px 0 8px; }
+.view-empty, .view-loading { color: var(--text-sub); padding: 24px 0; font-size: 14px; }
+.due-group { font-size: 14px; margin: 18px 0 6px; display: flex; align-items: center; gap: 8px; color: var(--text-sub); }
+.due-group-overdue { color: var(--danger); }
+.due-group-today { color: #c26a00; }
+.due-count { font-size: 11px; background: var(--chip); border-radius: 9px; padding: 0 7px; color: var(--text-sub); font-weight: normal; }
+.result { border-radius: 6px; cursor: pointer; padding: 2px 4px; }
+.result:hover { background: var(--bg-hover); }
+.result .content { min-height: 0; }
+.result .bullet { cursor: pointer; }
+.result-path { font-size: 12px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-bottom: 4px; }
+.result.has-checkbox > .row > .cb { display: block; }
+@media (max-width: 760px) { #view { padding: 4px 14px 40vh; } }
+
+/* ---------- 取り込み */
+.import-modal { max-width: 560px; }
+.import-body { padding: 0 16px; overflow-y: auto; }
+.import-help { font-size: 13px; color: var(--text-sub); margin: 0 0 10px; line-height: 1.7; }
+.import-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.import-row .finder-input { flex: 1; }
+.import-opml { font-size: 13px; margin-bottom: 12px; }
+.import-opml summary { cursor: pointer; color: var(--accent); margin-bottom: 6px; }
+.import-bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+.import-bar-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+.import-log { font-size: 12px; color: var(--text-sub); max-height: 180px; overflow-y: auto; white-space: pre-wrap; }

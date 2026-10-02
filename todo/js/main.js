@@ -3,6 +3,8 @@ import { initAttachments } from './attachments.js';
 import * as outline from './outline.js';
 import * as library from './library.js';
 import { showShortcuts } from './help.js';
+import * as views from './views.js';
+import { initImporter, showImporter } from './importer.js';
 
 const $ = (id) => document.getElementById(id);
 const LAST_DOC_KEY = 'todo.lastDoc';
@@ -110,6 +112,9 @@ async function startApp(user) {
     onSelection: (count) => onSelectionChange(count),
   });
 
+  views.initViews(api, { view: $('view'), crumbs: $('crumbs'), onChanged: () => { viewChanged = true; } });
+  initImporter(api, library, async () => { await library.loadLibrary(); refreshTags(); });
+
   setupChrome(user);
   setupToolbar();
 
@@ -134,7 +139,28 @@ async function startApp(user) {
 
   addEventListener('hashchange', route);
   await route();
+  refreshTags();
+  backfillIndex();
 }
+
+// サイドバーのタグ一覧と、入力補完用のタグを読み直す
+async function refreshTags() {
+  const tags = await views.renderTagList($('tags'));
+  outline.setKnownTags(tags);
+}
+
+// 期日・タグの索引が入る前に書かれた項目に、索引を付ける(初回だけ)
+async function backfillIndex() {
+  const KEY = 'todo.indexed.v1';
+  try { if (localStorage.getItem(KEY)) return; } catch {}
+  try {
+    const rows = await api.nodesNeedingIndex();
+    if (rows.length) { await api.upsertNodes(rows); refreshTags(); }
+    try { localStorage.setItem(KEY, '1'); } catch {}
+  } catch (err) { console.error(err); }
+}
+
+let viewChanged = false;
 
 let routing = Promise.resolve();
 function route() {
@@ -143,9 +169,24 @@ function route() {
 }
 
 async function doRoute() {
-  const m = /^#\/d\/([0-9a-f-]{36})(?:\/([0-9a-f-]{36}))?/.exec(location.hash);
+  const hash = location.hash;
+  // 検索・期日一覧
+  const sm = /^#\/search\/(.*)$/.exec(hash);
+  if (sm || hash === '#/due') {
+    await outline.flush();
+    closeSidebar();
+    showView(true);
+    if (sm) await views.renderSearch(decodeURIComponent(sm[1]));
+    else await views.renderDue();
+    document.title = `${sm ? '検索' : '期日一覧'} - Outline Todo`;
+    markNav(sm ? 'nav-search' : 'nav-due');
+    refreshTags();
+    return;
+  }
+  const m = /^#\/d\/([0-9a-f-]{36})(?:\/([0-9a-f-]{36}))?(?:\?focus=([0-9a-f-]{36}))?/.exec(hash);
   let docId = m?.[1];
   const zoom = m?.[2] ?? null;
+  const focus = m?.[3] ?? null;
   if (!docId || !library.getDoc(docId)) {
     let last = null;
     try { last = localStorage.getItem(LAST_DOC_KEY); } catch {}
@@ -155,11 +196,33 @@ async function doRoute() {
   }
   try { localStorage.setItem(LAST_DOC_KEY, docId); } catch {}
   closeSidebar();
-  if (outline.currentDoc()?.id !== docId) await outline.openDoc(library.getDoc(docId), zoom);
-  else if (outline.currentZoom() !== zoom) outline.setZoom(zoom);
+  const fromView = showView(false);
+  // 一覧で完了や期日を変えたあとは読み直す
+  if (outline.currentDoc()?.id !== docId || (fromView && viewChanged)) {
+    viewChanged = false;
+    await outline.openDoc(library.getDoc(docId), focus ? null : zoom);
+  } else if (outline.currentZoom() !== zoom && !focus) outline.setZoom(zoom);
+  if (focus) outline.revealNode(focus);
   $('toggle-checked').textContent = outline.currentDoc().show_checked ? '完了を隠す' : '完了を表示';
+  markNav(null);
   library.render();
+  refreshTags();
   document.title = `${outline.currentDoc().title || '無題'} - Outline Todo`;
+}
+
+// 文書の画面と、検索・期日一覧の画面を切り替える。切り替え前が一覧なら true
+function showView(on) {
+  const wasView = !$('view').hidden;
+  $('view').hidden = !on;
+  $('page').hidden = on;
+  $('toggle-checked').hidden = on;
+  document.body.classList.toggle('in-view', on);
+  if (on) document.activeElement?.blur?.();
+  return wasView;
+}
+
+function markNav(id) {
+  for (const el of document.querySelectorAll('.nav-item')) el.classList.toggle('active', el.id === id);
 }
 
 function setStatus(s) {
@@ -226,6 +289,7 @@ function setupChrome(user) {
   };
   $('new-folder').onclick = () => library.newFolder();
   $('help-btn').onclick = showShortcuts;
+  $('import-btn').onclick = showImporter;
   addEventListener('keydown', (e) => {
     if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.altKey) return;
     const run = (fn) => { e.preventDefault(); fn(); };
@@ -235,6 +299,7 @@ function setupChrome(user) {
     if (e.shiftKey && e.code === 'KeyF') return run(toggleSidebar);
     if (!e.shiftKey && e.code === 'KeyO') return run(openFinder);
     if (e.shiftKey && e.code === 'KeyM') return run(() => outline.moveFocusedToDocument());
+    if (!e.shiftKey && e.code === 'KeyF') return run(() => { location.hash = '#/search/'; });
   });
   $('toggle-checked').onclick = () => {
     const d = outline.currentDoc();
@@ -276,6 +341,7 @@ function setupToolbar() {
     ['↓', '下へ移動', act((f) => outline.moveDown(f.id))],
     ['☐', 'チェックボックス', act((f) => outline.toggleCheckbox(f.id))],
     ['✓', '完了', act((f) => outline.toggleChecked(f.id))],
+    ['📅', '期日', act((f) => outline.pickDate(f.id, document.activeElement))],
     ['📎', '添付', act((f) => outline.pickFiles({ ...f, field: f.field === 'note' ? 'note' : 'content' }))],
     ['✎', 'メモ', act((f) => outline.toggleNote(f.id, f.field))],
     ['↶', '元に戻す', () => outline.undo()],

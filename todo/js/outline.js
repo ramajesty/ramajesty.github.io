@@ -8,6 +8,7 @@ import {
   attIds, marker, ATT_RE, MD_LINK_RE, hasMdLink,
 } from './content.js';
 import { parseClipboard } from './paste.js';
+import { setDueInText, parseDue, toDateValue, extractTags } from './syntax.js';
 import { ensureLoaded, startUpload, handleChipClick } from './attachments.js';
 
 const SNAP_FIELDS = ['document_id', 'parent_id', 'sort_key', 'content', 'note', 'checkbox', 'checked', 'collapsed', 'deleted_at'];
@@ -1154,6 +1155,7 @@ function onInput(e) {
   paint(n);
   if (t.id === zoomId) renderCrumbs();
   commitTextSoon();
+  updateComplete(t);
 }
 
 // 編集を始めたら [表示名](URL) を元の書き方で見せる(Dynalist と同じ)
@@ -1172,6 +1174,7 @@ function onFocusIn(e) {
 }
 
 function onFocusOut(e) {
+  closeComplete();
   const t = eventTarget(e);
   if (!t || t.field === 'title') return;
   commitText();
@@ -1186,6 +1189,7 @@ function onKeyDown(e) {
   const t = eventTarget(e);
   if (!t) return;
   if (e.isComposing || e.keyCode === 229) return;
+  if (handleCompleteKey(e)) return;
   const k = e.key;
   const mod = modKey(e);
   const stop = () => { e.preventDefault(); e.stopPropagation(); };
@@ -1230,6 +1234,7 @@ function onKeyDown(e) {
   if (mod && e.shiftKey && e.code === 'KeyA') { stop(); selectAll(); return; }
   if (mod && (k === 'Home' || k === 'End')) { stop(); goToEdge(k === 'Home' ? -1 : 1); return; }
   if (mod && !e.shiftKey && e.code === 'KeyK') { stop(); addLink(t); return; }
+  if (mod && !e.shiftKey && e.code === 'KeyD') { stop(); pickDate(id, t.el); return; }
 
   if (isTitle) {
     if (k === 'ArrowDown' && (field === 'note' || !noteShown(id)) && caretOnEdgeLine(t.el, 1)) {
@@ -1325,7 +1330,20 @@ function onClick(e) {
   const link = e.target.closest?.('a.link');
   if (link && (modKey(e) || !pointerWasFocused)) {
     e.preventDefault();
-    window.open(link.href, '_blank', 'noopener');
+    openLink(link.href);
+    return;
+  }
+  const tag = e.target.closest?.('.tag');
+  if (tag && (modKey(e) || !pointerWasFocused)) {
+    e.preventDefault();
+    location.hash = `#/search/${encodeURIComponent(tag.dataset.tag)}`;
+    return;
+  }
+  const due = e.target.closest?.('.due');
+  if (due) {
+    e.preventDefault();
+    const t = eventTarget({ target: due.closest('.content, .note, .title, .title-note') });
+    if (t?.id) pickDate(t.id, due);
     return;
   }
   const nodeEl = e.target.closest?.('.node');
@@ -1503,6 +1521,154 @@ function dropTarget(e) {
   if (nodeEl) return { id: nodeEl.dataset.id, field: 'content', offset: null };
   const f = lastFocus;
   return f?.id ? f : null;
+}
+
+// ============================================================ 期日・タグ・リンク
+
+// アプリ内のリンク(#/d/...)はこの画面で開き、それ以外は新しいタブで開く
+function openLink(href) {
+  const base = location.href.split('#')[0];
+  if (href.startsWith(base + '#/')) { location.hash = href.slice(base.length); return; }
+  window.open(href, '_blank', 'noopener');
+}
+
+// 期日を日付選択で入れる / 変える。消すときは選択画面の「クリア」
+export function pickDate(id, anchor) {
+  const n = nodes.get(id);
+  if (!n) return;
+  const due = parseDue(n.content);
+  chooseDate(due ? toDateValue(due.date) : toDateValue(new Date()), anchor, (value) => {
+    begin();
+    set(id, { content: setDueInText(n.content, value) });
+    repaintText(n);
+    commit({ id, field: 'content', offset: null });
+    if (!isTouch()) focusNode(id);
+  });
+}
+
+let dateInput;
+export function chooseDate(initial, anchor, onPick) {
+  if (!dateInput) {
+    dateInput = h('input', { type: 'date', class: 'date-input', tabindex: '-1', 'aria-label': '期日' });
+    document.body.append(dateInput);
+  }
+  const r = anchor?.getBoundingClientRect?.();
+  dateInput.style.left = `${Math.max(8, Math.min(r ? r.left : innerWidth / 2, innerWidth - 40))}px`;
+  dateInput.style.top = `${Math.max(8, Math.min(r ? r.bottom : innerHeight / 2, innerHeight - 40))}px`;
+  dateInput.value = initial || '';
+  // 1回選んだら終わり。入力欄に残ったキー操作で日付が変わらないように離れる
+  dateInput.onchange = () => {
+    dateInput.onchange = null;
+    const v = dateInput.value || null;
+    dateInput.blur();
+    onPick(v);
+  };
+  try { dateInput.showPicker(); }
+  catch {
+    const v = prompt('期日(例 2026-10-15)。空にすると期日を消します', initial || '');
+    if (v === null) return;
+    if (!v.trim()) return onPick(null);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v.trim())) onPick(v.trim());
+    else toast('日付は 2026-10-15 の形で入力してください');
+  }
+}
+
+// ---------- タグの入力補完
+
+let knownTags = [];
+let complete = null; // { el, t, start, items, active }
+const TAG_PREFIX_RE = /(^|[\s(（「『、。,])([#@][^\s#@!()（）「」『』、。,.:;"'<>[\]{}]*)$/;
+
+export function setKnownTags(list) {
+  knownTags = list.map((x) => x.tag ?? x);
+}
+
+function tagsInDoc() {
+  const set = new Set();
+  for (const n of nodes.values()) if (!n.deleted_at) for (const t of extractTags(`${n.content} ${n.note}`)) set.add(t);
+  return set;
+}
+
+function updateComplete(t) {
+  if (t.field === 'title') return closeComplete();
+  const c = getCaret(t.el);
+  if (!c || c.start !== c.end) return closeComplete();
+  const text = nodes.get(t.id)?.[t.field] ?? '';
+  const m = TAG_PREFIX_RE.exec(text.slice(0, c.start));
+  if (!m) return closeComplete();
+  const word = m[2].toLowerCase();
+  const all = [...new Set([...knownTags, ...tagsInDoc()])];
+  const items = all.filter((x) => x[0] === word[0] && x.startsWith(word) && x !== word).slice(0, 8);
+  if (!items.length) return closeComplete();
+  if (!complete) {
+    complete = { box: h('div', { class: 'complete-box', role: 'listbox' }) };
+    document.body.append(complete.box);
+    complete.box.addEventListener('mousedown', (e) => e.preventDefault());
+  }
+  Object.assign(complete, { t, start: c.start - m[2].length, end: c.start, items, active: 0 });
+  paintComplete();
+  const sel = getSelection().getRangeAt(0).cloneRange();
+  const rect = sel.getClientRects()[0] ?? t.el.getBoundingClientRect();
+  complete.box.style.left = `${Math.min(rect.left, innerWidth - 220)}px`;
+  complete.box.style.top = `${rect.bottom + 4}px`;
+}
+
+function paintComplete() {
+  complete.box.textContent = '';
+  complete.items.forEach((tag, i) => complete.box.append(h('div', {
+    class: 'complete-item' + (i === complete.active ? ' active' : ''), role: 'option',
+    onclick: () => { complete.active = i; acceptComplete(); },
+  }, tag)));
+}
+
+function closeComplete() {
+  if (!complete) return;
+  complete.box.remove();
+  complete = null;
+}
+
+function acceptComplete() {
+  const { t, start, end, items, active } = complete;
+  const tag = items[active];
+  closeComplete();
+  const n = nodes.get(t.id);
+  const text = n[t.field];
+  const next = `${text.slice(0, start)}${tag} ${text.slice(end).replace(/^ /, '')}`;
+  n[t.field] = next;
+  markDirty(t.id);
+  renderInto(t.el, next, { raw: true });
+  setCaret(t.el, start + tag.length + 1);
+  commitTextSoon();
+}
+
+function handleCompleteKey(e) {
+  if (!complete) return false;
+  const k = e.key;
+  if (k === 'ArrowDown' || k === 'ArrowUp') {
+    e.preventDefault();
+    complete.active = (complete.active + (k === 'ArrowDown' ? 1 : -1) + complete.items.length) % complete.items.length;
+    paintComplete();
+    return true;
+  }
+  if (k === 'Enter' || k === 'Tab') { e.preventDefault(); e.stopPropagation(); acceptComplete(); return true; }
+  if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); closeComplete(); return true; }
+  return false;
+}
+
+// 検索結果・期日一覧から移ってきたとき、その項目を表示して光らせる
+export function revealNode(id) {
+  const n = nodes.get(id);
+  if (!n || n.deleted_at) return;
+  if (zoomId && !isInside(id, zoomId)) setZoom(null);
+  for (const a of ancestors(id)) if (a.collapsed) { a.collapsed = false; markDirty(a.id); }
+  if (isHidden(n)) setShowChecked(true);
+  renderAll();
+  const r = els.get(id);
+  if (!r) return;
+  r.row.scrollIntoView({ block: 'center' });
+  r.row.classList.add('flash');
+  setTimeout(() => r.row.classList.remove('flash'), 1600);
+  if (!isTouch()) focusNode(id);
 }
 
 // ============================================================ Dynalist 互換の操作

@@ -30,9 +30,17 @@
       <button id="new-doc" class="btn small" type="button">＋ ドキュメント</button>
       <button id="new-folder" class="btn small" type="button">＋ フォルダ</button>
     </div>
-    <nav id="tree"></nav>
+    <nav class="side-nav">
+      <a class="tree-item nav-item" id="nav-search" href="#/search/"><span class="nav-icon">🔍</span><span class="tree-label">検索</span></a>
+      <a class="tree-item nav-item" id="nav-due" href="#/due"><span class="nav-icon">📅</span><span class="tree-label">期日一覧</span></a>
+    </nav>
+    <div class="side-scroll">
+      <nav id="tree"></nav>
+      <div id="tags"></div>
+    </div>
     <div class="side-foot">
       <span id="user-email"></span>
+      <button id="import-btn" class="link-btn" type="button">Dynalist から取り込み</button>
       <button id="logout" class="link-btn" type="button">ログアウト</button>
     </div>
   </aside>
@@ -51,6 +59,7 @@
       <div id="title-note" class="title-note" hidden></div>
       <div id="outline"></div>
     </div>
+    <div id="view" hidden></div>
   </main>
 
   <div id="toolbar" hidden></div>

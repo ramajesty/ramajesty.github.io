@@ -2,6 +2,7 @@
 // 位置はすべて「本文文字列上の文字数」で表す。添付チップ1つは {{att:ID}} の文字数ぶんと数える。
 import { h } from './util.js';
 import { makeChip } from './attachments.js';
+import { DATE_RE, TAG_RE, parseDue, formatDue } from './syntax.js';
 
 export const ATT_RE = /\{\{att:([0-9a-f-]{36})\}\}/g;
 // Dynalist と同じ [表示名](URL) 形式のリンク
@@ -13,7 +14,8 @@ export function attIds(text) {
   return [...text.matchAll(ATT_RE)].map((m) => m[1]);
 }
 
-export const hasMdLink = (text) => text.search(MD_LINK_RE) >= 0;
+// 表示用に置き換わる部分([表示名](URL) と期日)があるか。あれば編集中は元の書き方を見せる
+export const hasMdLink = (text) => text.search(MD_LINK_RE) >= 0 || text.search(DATE_RE) >= 0;
 
 // 本文文字列を el の中身として描画する。raw: 編集用に [表示名](URL) をそのまま見せる
 export function renderInto(el, text, { raw = false } = {}) {
@@ -48,9 +50,40 @@ function appendText(el, s) {
   if (!s) return;
   let last = 0;
   for (const m of s.matchAll(URL_RE)) {
-    if (m.index > last) el.append(document.createTextNode(s.slice(last, m.index)));
+    appendDates(el, s.slice(last, m.index));
     el.append(h('a', { class: 'link', href: m[0], target: '_blank', rel: 'noopener', text: m[0] }));
     last = m.index + m[0].length;
+  }
+  appendDates(el, s.slice(last));
+}
+
+// 期日 !(2026-10-15) はバッジ(1つのかたまり)にする
+function appendDates(el, s) {
+  if (!s) return;
+  let last = 0;
+  for (const m of s.matchAll(DATE_RE)) {
+    appendTags(el, s.slice(last, m.index));
+    const due = parseDue(m[0]);
+    if (due) {
+      const f = formatDue(due);
+      el.append(h('span', { class: `due due-${f.state}`, contenteditable: 'false', 'data-md': m[0], title: m[0].slice(2, -1), text: f.label }));
+    } else {
+      appendTags(el, m[0]);
+    }
+    last = m.index + m[0].length;
+  }
+  appendTags(el, s.slice(last));
+}
+
+// タグ #xxx / @xxx は押せる文字にする(文字はそのまま編集できる)
+function appendTags(el, s) {
+  if (!s) return;
+  let last = 0;
+  for (const m of s.matchAll(TAG_RE)) {
+    const start = m.index + m[1].length;
+    if (start > last) el.append(document.createTextNode(s.slice(last, start)));
+    el.append(h('span', { class: 'tag', 'data-tag': m[2].toLowerCase(), text: m[2] }));
+    last = start + m[2].length;
   }
   if (last < s.length) el.append(document.createTextNode(s.slice(last)));
 }
