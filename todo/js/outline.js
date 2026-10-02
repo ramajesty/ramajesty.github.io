@@ -887,7 +887,7 @@ function onSelKeyDown(e) {
   if (k === 'ArrowUp' || k === 'ArrowDown') { stop(); const ids = selectedIds(); clearSelection(k === 'ArrowUp' ? ids[0] : ids.at(-1)); return; }
   if (k === 'Tab') { stop(); selectionAction(e.shiftKey ? 'outdent' : 'indent'); return; }
   if (k === 'Backspace' || k === 'Delete') { stop(); selectionAction('delete'); return; }
-  if (k === 'Enter' && mod && e.shiftKey) { stop(); selectionAction('checkbox'); return; }
+  if (mod && e.shiftKey && (k === 'Enter' || e.code === 'KeyC')) { stop(); selectionAction('checkbox'); return; }
   if (k === 'Enter' && mod) { stop(); selectionAction('check'); return; }
   if (k === 'Enter') { stop(); clearSelection(); return; }
   if (mod && k.toLowerCase() === 'z') { stop(); e.shiftKey ? redo() : undo(); return; }
@@ -1210,7 +1210,8 @@ function onKeyDown(e) {
     enter(id); return;
   }
   if (k === 'Enter' && e.shiftKey && !mod) { stop(); toggleNote(id, field); return; }
-  if (k === 'Enter' && mod && e.shiftKey) { stop(); if (!isTitle) toggleCheckbox(id); return; }
+  // Ctrl+Shift+C は Dynalist と同じ。Ctrl+Shift+Enter も使える
+  if (mod && e.shiftKey && (k === 'Enter' || e.code === 'KeyC')) { stop(); if (!isTitle) toggleCheckbox(id); return; }
   if (k === 'Enter' && mod) { stop(); toggleChecked(id); return; }
   if (k === 'Escape') { stop(); t.el.blur(); return; }
 

@@ -153,7 +153,7 @@ Markdown の装飾(太字・見出しなど)は扱わない。本文で解釈す
 | `Tab` / `Shift+Tab` | インデント / アウトデント |
 | `Ctrl+↑` / `Ctrl+↓` | 項目を上/下へ移動 |
 | `Ctrl+Enter` | 完了の切り替え |
-| `Ctrl+Shift+Enter` | チェックボックス表示の切り替え |
+| `Ctrl+Shift+C`(`Ctrl+Shift+Enter` も可) | チェックボックス表示の切り替え |
 | `Ctrl+.` | 折りたたみ/展開の切り替え |
 | `Alt+→` / `Alt+←` | ズームイン / ズームアウト |
 | `Ctrl+D` | 期日の入力 |
