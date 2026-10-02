@@ -1525,11 +1525,17 @@ function dropTarget(e) {
 
 // ============================================================ 期日・タグ・リンク
 
-// アプリ内のリンク(#/d/...)はこの画面で開き、それ以外は新しいタブで開く
-function openLink(href) {
+// アプリ内のリンク(#/d/...)はこの画面で開き、それ以外は新しいタブで開く。
+// 項目へのリンクは Dynalist と同じく、その項目にズームして開く
+export function openLink(href) {
   const base = location.href.split('#')[0];
-  if (href.startsWith(base + '#/')) { location.hash = href.slice(base.length); return; }
-  window.open(href, '_blank', 'noopener');
+  const i = href.indexOf('#/');
+  const sameApp = href.startsWith(base + '#/') || (i > 0 && href.slice(0, i).replace(/\?.*$/, '') === base.replace(/\?.*$/, ''));
+  if (!sameApp) { window.open(href, '_blank', 'noopener'); return; }
+  let hash = href.slice(i);
+  const m = /^#\/d\/([0-9a-f-]{36})\?focus=([0-9a-f-]{36})$/.exec(hash);
+  if (m) hash = `#/d/${m[1]}/${m[2]}`;
+  location.hash = hash;
 }
 
 // 期日を日付選択で入れる / 変える。消すときは選択画面の「クリア」

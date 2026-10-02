@@ -86,7 +86,7 @@ function rewriteLinks(rows, docMap, nodeMap, titles) {
     const doc = docMap.get(fileId);
     if (!doc) return null;
     const node = nodeId && nodeMap.get(nodeId);
-    return { url: node ? `${base}#/d/${doc}?focus=${node}` : `${base}#/d/${doc}`, title: (node && titles.get(node)) || titles.get(doc) };
+    return { url: node ? `${base}#/d/${doc}/${node}` : `${base}#/d/${doc}`, title: (node && titles.get(node)) || titles.get(doc) };
   };
   for (const r of rows) {
     for (const field of ['content', 'note']) {
