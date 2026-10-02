@@ -231,3 +231,9 @@ function isFolderInside(id, ancestorId) {
 }
 
 export const newFolder = () => createFolder(null);
+export function expandFolder(id) {
+  openFolders.add(id);
+  rememberOpen();
+}
+// いちばん上の階層の末尾に置くフォルダの並び順キー
+export const nextTopFolderKey = () => lastKey(childFolders(null));

@@ -1,4 +1,5 @@
 // 開発用: Supabase の代わりにブラウザ内で動く模擬 API(localhost で ?mock を付けたときだけ使う)
+import { indexFields } from '../js/syntax.js';
 const KEY = 'todo.mock';
 const USER = { id: '00000000-0000-4000-8000-000000000001', email: 'dev@example.com' };
 
@@ -18,6 +19,10 @@ export function createMockApi() {
     emit(table, db[table][row.id]);
   };
   window.__mockDb = db;
+  // 削除されていない文書の、削除されていない項目(documents の名前つき)
+  const liveNodes = () => Object.values(db.nodes)
+    .filter((n) => !n.deleted_at && db.documents[n.document_id] && !db.documents[n.document_id].deleted_at)
+    .map((n) => ({ ...n, documents: { title: db.documents[n.document_id].title, deleted_at: null } }));
   window.__mockRemote = (table, row) => { upsert(table, row); save(); };
 
   return {
@@ -35,10 +40,34 @@ export function createMockApi() {
     loadNodes: (docId) => delay(Object.values(db.nodes).filter((r) => r.document_id === docId && !r.deleted_at).map((r) => ({ ...r }))),
     async upsertNodes(rows) {
       if (window.__mockFail) { await delay(); throw new Error('mock failure'); }
-      for (const r of rows) upsert('nodes', { ...r });
+      for (const r of rows) upsert('nodes', { ...r, ...indexFields(r) });
       save();
       await delay();
     },
+    async searchNodes({ words = [], tag = null, includeChecked = false, limit = 300 }) {
+      await delay();
+      return liveNodes().filter((n) => (includeChecked || !n.checked)
+        && words.every((w) => `${n.content}\n${n.note}`.toLowerCase().includes(w.toLowerCase()))
+        && (!tag || (n.tags || []).includes(tag))).slice(0, limit);
+    },
+    async dueNodes({ includeChecked = false }) {
+      await delay();
+      return liveNodes().filter((n) => n.due_at && (includeChecked || !n.checked)).sort((a, b) => a.due_at.localeCompare(b.due_at));
+    },
+    async listTags() {
+      await delay();
+      const counts = new Map();
+      for (const n of liveNodes()) if (!n.checked) for (const t of n.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+      return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count);
+    },
+    loadNodesByIds: (ids) => delay(ids.map((id) => db.nodes[id]).filter(Boolean).map((r) => ({ ...r }))),
+    async updateNode(id, fields) {
+      const n = db.nodes[id];
+      upsert('nodes', { ...n, ...fields, ...('content' in fields ? indexFields({ ...n, ...fields }) : {}) });
+      save();
+      await delay();
+    },
+    nodesNeedingIndex: () => delay([]),
     loadAttachments: (ids) => delay(ids.map((id) => db.attachments[id]).filter(Boolean).map((r) => ({ ...r }))),
     async insertAttachment(row) { db.attachments[row.id] = { user_id: USER.id, ...row }; save(); await delay(); },
     async uploadFile(path, blob) { files.set(path, blob); await delay(); },
