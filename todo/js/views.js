@@ -4,7 +4,7 @@ import { renderInto, ATT_RE, MD_LINK_RE } from './content.js';
 import { ensureLoaded } from './attachments.js';
 import { attIds } from './content.js';
 import { parseDue, dueGroup, setDueInText, toDateValue } from './syntax.js';
-import { chooseDate } from './outline.js';
+import { chooseDate, openLink } from './outline.js';
 
 let api;
 let ui; // { view, crumbs, onChanged }
@@ -43,7 +43,7 @@ function resultRow(n, crumbs) {
         h('div', { class: 'result-path', text: crumbs }))));
   const go = () => { location.hash = `#/d/${n.document_id}?focus=${n.id}`; };
   row.addEventListener('click', (e) => {
-    if (e.target.closest('a.link')) { e.preventDefault(); window.open(e.target.closest('a.link').href, '_blank', 'noopener'); return; }
+    if (e.target.closest('a.link')) { e.preventDefault(); openLink(e.target.closest('a.link').href); return; }
     if (e.target.closest('.att')) return;
     if (e.target.closest('.cb')) { toggleChecked(n, row); return; }
     if (e.target.closest('.due')) { changeDue(n, row, e.target.closest('.due')); return; }
