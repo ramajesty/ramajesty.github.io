@@ -315,3 +315,18 @@ button { font: inherit; color: inherit; }
   .shortcuts-group dd { margin-bottom: 6px; }
   .shortcuts kbd { white-space: normal; }
 }
+
+/* ---------- ファイル一覧を隠す(PC)・ドキュメント検索 */
+@media (min-width: 761px) {
+  .sidebar-hidden #sidebar { display: none; }
+  .sidebar-hidden #menu-btn { display: block; }
+}
+.finder .modal { align-self: start; margin-top: 12vh; }
+.finder-field { padding: 0 16px 8px; }
+.finder-input {
+  width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--text);
+}
+.finder-list { padding-bottom: 10px; }
+.modal-item.active { background: var(--accent-soft); color: var(--accent); }
+.finder-empty { color: var(--text-faint); padding: 8px; font-size: 13px; }

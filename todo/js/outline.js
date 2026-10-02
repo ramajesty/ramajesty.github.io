@@ -887,12 +887,13 @@ function onSelKeyDown(e) {
   if (k === 'ArrowUp' || k === 'ArrowDown') { stop(); const ids = selectedIds(); clearSelection(k === 'ArrowUp' ? ids[0] : ids.at(-1)); return; }
   if (k === 'Tab') { stop(); selectionAction(e.shiftKey ? 'outdent' : 'indent'); return; }
   if (k === 'Backspace' || k === 'Delete') { stop(); selectionAction('delete'); return; }
-  if (mod && e.shiftKey && (k === 'Enter' || e.code === 'KeyC')) { stop(); selectionAction('checkbox'); return; }
+  if (mod && e.shiftKey && e.code === 'KeyC') { stop(); selectionAction('checkbox'); return; }
   if (k === 'Enter' && mod) { stop(); selectionAction('check'); return; }
   if (k === 'Enter') { stop(); clearSelection(); return; }
   if (mod && k.toLowerCase() === 'z') { stop(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k.toLowerCase() === 'y') { stop(); redo(); return; }
-  if (mod && k.toLowerCase() === 'a') { stop(); const v = visibleIds(); sel = { anchor: v[0], focus: v.at(-1) }; paintSelection(); return; }
+  if (mod && e.code === 'KeyA') { stop(); selectAll(); return; }
+  if (mod && e.shiftKey && e.code === 'KeyM') { stop(); selectionAction('move-doc'); return; }
   if (mod && ['c', 'x', 'v'].includes(k.toLowerCase())) return; // copy / cut / paste イベントで処理
   if (!mod && !e.altKey && k.length === 1) { stop(); clearSelection(); }
 }
@@ -1113,6 +1114,13 @@ export function insertFiles(files, target = currentFocus() ?? lastFocus) {
 
 export const focusForAttach = () => currentFocus() ?? lastFocus;
 
+// Ctrl+Shift+M: 選択中ならその項目たち、そうでなければ今の項目を別のドキュメントへ
+export function moveFocusedToDocument() {
+  if (sel) return selectionAction('move-doc');
+  const f = currentFocus() ?? lastFocus;
+  if (f?.id && f.id !== zoomId && nodes.get(f.id)) moveToDocument([f.id]);
+}
+
 // ============================================================ イベント
 
 function eventTarget(e) {
@@ -1210,10 +1218,18 @@ function onKeyDown(e) {
     enter(id); return;
   }
   if (k === 'Enter' && e.shiftKey && !mod) { stop(); toggleNote(id, field); return; }
-  // Ctrl+Shift+C は Dynalist と同じ。Ctrl+Shift+Enter も使える
-  if (mod && e.shiftKey && (k === 'Enter' || e.code === 'KeyC')) { stop(); if (!isTitle) toggleCheckbox(id); return; }
+  if (mod && e.shiftKey && e.code === 'KeyC') { stop(); if (!isTitle) toggleCheckbox(id); return; }
+  // Dynalist の「項目内で改行」。項目内の改行には対応していないので何もしない
+  if (mod && e.shiftKey && k === 'Enter') { stop(); return; }
   if (k === 'Enter' && mod) { stop(); toggleChecked(id); return; }
   if (k === 'Escape') { stop(); t.el.blur(); return; }
+  if (mod && !e.shiftKey && k === '[') { stop(); zoomOut(); return; }
+  if (mod && e.shiftKey && (k === '[' || k === '{')) { stop(); zoomSibling(-1); return; }
+  if (mod && e.shiftKey && (k === ']' || k === '}')) { stop(); zoomSibling(1); return; }
+  if (mod && e.shiftKey && (k === '>' || k === '.')) { stop(); toggleAllCollapse(); return; }
+  if (mod && e.shiftKey && e.code === 'KeyA') { stop(); selectAll(); return; }
+  if (mod && (k === 'Home' || k === 'End')) { stop(); goToEdge(k === 'Home' ? -1 : 1); return; }
+  if (mod && !e.shiftKey && e.code === 'KeyK') { stop(); addLink(t); return; }
 
   if (isTitle) {
     if (k === 'ArrowDown' && (field === 'note' || !noteShown(id)) && caretOnEdgeLine(t.el, 1)) {
@@ -1223,13 +1239,15 @@ function onKeyDown(e) {
       stop(); focusAtX(ui.titleNote, caretX(), 1);
     } else if (k === 'ArrowUp' && field === 'note' && caretOnEdgeLine(t.el, -1)) {
       stop(); focusAtX(ui.title, caretX(), -1);
-    } else if (k === 'ArrowLeft' && e.altKey) {
+    } else if ((k === 'ArrowLeft' && e.altKey) || (mod && k === '[')) {
       stop(); zoomOut();
     }
     return;
   }
 
   if (k === 'Tab') { stop(); e.shiftKey ? outdent(id) : indent(id); return; }
+  if (mod && !e.shiftKey && k === ']') { stop(); zoomTo(id); return; }
+  if (mod && e.shiftKey && e.code === 'KeyM') { stop(); moveToDocument([id]); return; }
   if (mod && k === 'ArrowUp') { stop(); moveUp(id); return; }
   if (mod && k === 'ArrowDown') { stop(); moveDown(id); return; }
   if (mod && k === '.') { stop(); toggleCollapse(id); return; }
@@ -1250,13 +1268,10 @@ function onKeyDown(e) {
   }
 
   if ((k === 'ArrowUp' || k === 'ArrowDown') && e.shiftKey && !mod && !e.altKey) {
-    // 文字の選択がもう広げられない端でさらに Shift+↑↓ を押したら、項目単位の選択に切り替える
-    const c = getCaret(t.el);
-    const atEdge = c && (k === 'ArrowUp' ? Math.min(c.start, c.end) === 0 : Math.max(c.start, c.end) === nodes.get(id)[field].length);
-    if (atEdge) {
-      stop();
-      startSelection(id, neighbor(id, k === 'ArrowUp' ? -1 : 1) ?? id);
-    }
+    // Dynalist と同じく、Shift+↑↓ でこの項目と前後の項目を選択する(メモ欄では文字の選択)
+    if (field === 'note') return;
+    stop();
+    startSelection(id, neighbor(id, k === 'ArrowUp' ? -1 : 1) ?? id);
     return;
   }
   if ((k === 'ArrowUp' || k === 'ArrowDown') && !e.shiftKey && !mod && !e.altKey) {
@@ -1487,6 +1502,68 @@ function dropTarget(e) {
   if (nodeEl) return { id: nodeEl.dataset.id, field: 'content', offset: null };
   const f = lastFocus;
   return f?.id ? f : null;
+}
+
+// ============================================================ Dynalist 互換の操作
+
+// ズーム中の項目の前 / 次の兄弟にズームを移す
+function zoomSibling(dir) {
+  if (!zoomId) return;
+  const z = nodes.get(zoomId);
+  const sibs = visibleChildren(z.parent_id);
+  const next = sibs[sibs.indexOf(z) + dir];
+  if (next) zoomTo(next.id);
+}
+
+// 表示中の項目をすべて折りたたむ。すでに全部折りたたまれていれば、すべて展開する
+export function toggleAllCollapse() {
+  const targets = childrenOf(zoomId).flatMap((r) => subtree(r.id)).filter((n) => childrenOf(n.id).length);
+  const collapse = targets.some((n) => !n.collapsed);
+  const f = currentFocus();
+  for (const n of targets) {
+    if (n.collapsed === collapse) continue;
+    n.collapsed = collapse;
+    markDirty(n.id);
+  }
+  renderAll();
+  // フォーカスしていた項目が隠れたら、見えている祖先に移す
+  let id = f?.id;
+  while (id && !els.get(id)) id = nodes.get(id)?.parent_id;
+  if (id && id !== zoomId) focusNode(id, f.id === id ? f.offset : Infinity);
+}
+
+function selectAll() {
+  const v = visibleIds();
+  if (!v.length) return;
+  if (sel) { sel = { anchor: v[0], focus: v.at(-1) }; paintSelection(); return; }
+  startSelection(v[0], v.at(-1));
+}
+
+function goToEdge(dir) {
+  const v = visibleIds();
+  const id = dir < 0 ? v[0] : v.at(-1);
+  if (!id) return;
+  focusNode(id, dir < 0 ? 0 : Infinity);
+  els.get(id)?.row.scrollIntoView({ block: 'nearest' });
+}
+
+// 選択した文字を [表示名](URL) のリンクにする
+function addLink(t) {
+  const n = nodes.get(t.id);
+  if (!n || t.field === 'title') return;
+  const c = getCaret(t.el);
+  if (!c) return;
+  const start = Math.min(c.start, c.end);
+  const end = Math.max(c.start, c.end);
+  const label = n[t.field].slice(start, end).replace(/[[\]\n]/g, ' ').trim();
+  const url = prompt(label ? `「${label}」に付けるリンク先(URL)` : 'リンク先(URL)', 'https://');
+  if (!url || !/^https?:\/\/\S+$/.test(url.trim())) { t.el.focus(); setCaret(t.el, end); return; }
+  const text = label ? `[${label}](${url.trim()})` : url.trim();
+  begin();
+  set(t.id, { [t.field]: n[t.field].slice(0, start) + text + n[t.field].slice(end) });
+  repaintText(n);
+  commit({ id: t.id, field: t.field, offset: start + text.length });
+  restoreFocus({ id: t.id, field: t.field, offset: start + text.length });
 }
 
 // ============================================================ ズーム・ドキュメント

@@ -169,10 +169,55 @@ function setStatus(s) {
 }
 
 function openSidebar() { document.body.classList.add('sidebar-open'); }
+
+// PC では左のファイル一覧を隠す / 出す。スマホでは引き出しを開け閉めする
+function toggleSidebar() {
+  if (matchMedia('(max-width: 760px)').matches) document.body.classList.toggle('sidebar-open');
+  else document.body.classList.toggle('sidebar-hidden');
+}
+
+// Ctrl+O: ドキュメントを名前で探して開く
+function openFinder() {
+  if (document.querySelector('.finder')) return;
+  const prev = document.activeElement;
+  const docs = library.docOptions();
+  let matches = docs;
+  let active = 0;
+  const input = h('input', { class: 'finder-input', type: 'text', placeholder: 'ドキュメント名で探す', autocomplete: 'off' });
+  const list = h('div', { class: 'modal-list finder-list' });
+  const close = (restore = true) => { overlay.remove(); if (restore && prev?.isConnected) prev.focus({ preventScroll: true }); };
+  const open = (d) => { close(false); location.hash = `#/d/${d.value}`; };
+  const render = () => {
+    list.textContent = '';
+    matches.forEach((d, i) => list.append(h('button', {
+      class: 'modal-item' + (i === active ? ' active' : ''), type: 'button', onclick: () => open(d),
+    }, d.label)));
+    if (!matches.length) list.append(h('div', { class: 'finder-empty', text: '見つかりません' }));
+    list.children[active]?.scrollIntoView({ block: 'nearest' });
+  };
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    matches = q ? docs.filter((d) => d.label.toLowerCase().includes(q)) : docs;
+    active = 0;
+    render();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, matches.length - 1); render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); render(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (matches[active]) open(matches[active]); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+  });
+  const overlay = h('div', { class: 'modal-overlay finder', onclick: (e) => { if (e.target === overlay) close(); } },
+    h('div', { class: 'modal' }, h('div', { class: 'modal-title', text: 'ドキュメントを開く' }), h('div', { class: 'finder-field' }, input), list));
+  document.body.append(overlay);
+  render();
+  input.focus();
+}
 function closeSidebar() { document.body.classList.remove('sidebar-open'); }
 
 function setupChrome(user) {
-  $('menu-btn').onclick = () => document.body.classList.toggle('sidebar-open');
+  $('menu-btn').onclick = toggleSidebar;
   $('scrim').onclick = closeSidebar;
   $('new-doc').onclick = async () => {
     const d = await library.createDoc('');
@@ -182,7 +227,14 @@ function setupChrome(user) {
   $('new-folder').onclick = () => library.newFolder();
   $('help-btn').onclick = showShortcuts;
   addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === '/' || e.code === 'Slash')) { e.preventDefault(); showShortcuts(); }
+    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const run = (fn) => { e.preventDefault(); fn(); };
+    if (e.key === '/' || e.code === 'Slash') return run(showShortcuts);
+    // ブラウザの「ページを保存」の代わりに、すぐ保存する
+    if (!e.shiftKey && e.code === 'KeyS') return run(async () => { await outline.flush(); toast('保存しました', 1200); });
+    if (e.shiftKey && e.code === 'KeyF') return run(toggleSidebar);
+    if (!e.shiftKey && e.code === 'KeyO') return run(openFinder);
+    if (e.shiftKey && e.code === 'KeyM') return run(() => outline.moveFocusedToDocument());
   });
   $('toggle-checked').onclick = () => {
     const d = outline.currentDoc();
