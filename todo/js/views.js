@@ -67,7 +67,7 @@ async function toggleChecked(n, row) {
 
 function changeDue(n, row, anchor) {
   const due = parseDue(n.content);
-  chooseDate(due ? toDateValue(due.date) : toDateValue(new Date()), anchor, async (value) => {
+  chooseDate(due ? toDateValue(due.date) : '', anchor, async (value) => {
     const content = setDueInText(n.content, value);
     try {
       await api.updateNode(n.id, { content, note: n.note });

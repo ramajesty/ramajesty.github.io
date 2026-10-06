@@ -1543,7 +1543,7 @@ export function pickDate(id, anchor) {
   const n = nodes.get(id);
   if (!n) return;
   const due = parseDue(n.content);
-  chooseDate(due ? toDateValue(due.date) : toDateValue(new Date()), anchor, (value) => {
+  chooseDate(due ? toDateValue(due.date) : '', anchor, (value) => {
     begin();
     set(id, { content: setDueInText(n.content, value) });
     repaintText(n);
@@ -1561,6 +1561,7 @@ export function chooseDate(initial, anchor, onPick) {
   const r = anchor?.getBoundingClientRect?.();
   dateInput.style.left = `${Math.max(8, Math.min(r ? r.left : innerWidth / 2, innerWidth - 40))}px`;
   dateInput.style.top = `${Math.max(8, Math.min(r ? r.bottom : innerHeight / 2, innerHeight - 40))}px`;
+  // 期日がないときは未選択で開く(今日を選んだ状態にすると、今日を押しても変更扱いにならない)
   dateInput.value = initial || '';
   // 1回選んだら終わり。入力欄に残ったキー操作で日付が変わらないように離れる
   dateInput.onchange = () => {
