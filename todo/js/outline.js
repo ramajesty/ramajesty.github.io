@@ -798,6 +798,7 @@ function pasteItems(id, items) {
 // ============================================================ 複数選択
 
 let sel = null; // { anchor, focus }: 表示順で anchor〜focus の範囲を選択
+let holdSelection = false; // 選択中の項目の点を押している / ドラッグしている間は選択を解除しない
 let sink = null; // 選択中にキー入力・コピーを受け取る見えない入力欄
 const CLIP_MIME = 'application/x-outline-todo';
 
@@ -854,7 +855,12 @@ function focusSink() {
     sink.addEventListener('paste', (e) => { e.preventDefault(); const last = selectedIds().at(-1); clearSelection(last); });
     sink.addEventListener('blur', () => {
       // 選択以外の場所をクリックしたら選択を解除
-      setTimeout(() => { if (sel && document.activeElement !== sink && !document.querySelector('.popup-menu, .modal-overlay')) { sel = null; paintSelection(); } }, 0);
+      setTimeout(() => {
+        if (sel && !holdSelection && document.activeElement !== sink && !document.querySelector('.popup-menu, .modal-overlay')) {
+          sel = null;
+          paintSelection();
+        }
+      }, 0);
     });
     document.body.append(sink);
   }
@@ -1077,7 +1083,12 @@ function setupPointerSelection(outline) {
         return;
       }
     }
-    if (sel && !e.target.closest('.bullet')) { sel = null; paintSelection(); }
+    if (sel && e.target.closest('.bullet') && e.target.closest('.node.selected')) {
+      // 選択した項目の点はまとめてドラッグできるように、選択を残す
+      holdSelection = true;
+      return;
+    }
+    if (sel) { sel = null; paintSelection(); }
     if (e.pointerType === 'mouse' && e.target.closest('.content, .note')) drag = { start: id };
   });
   addEventListener('pointermove', (e) => {
@@ -1089,7 +1100,11 @@ function setupPointerSelection(outline) {
     if (!sel) { getSelection().removeAllRanges(); startSelection(drag.start, id); }
     else if (sel.focus !== id) extendSelection(id);
   });
-  addEventListener('pointerup', () => { drag = null; });
+  addEventListener('pointerup', () => {
+    drag = null;
+    // ドラッグせずに離したとき(クリック)は、選択を続けるために入力欄へ戻す
+    if (holdSelection) { holdSelection = false; if (sel) focusSink(); }
+  });
 }
 
 // ============================================================ 添付の挿入
@@ -1438,12 +1453,13 @@ function setupDragDrop() {
     dragRoots = roots.includes(dragId) ? roots : [dragId];
     e.dataTransfer.setData('text/plain', plain(nodes.get(dragId).content));
     e.dataTransfer.effectAllowed = 'move';
-    els.get(dragId)?.el.classList.add('dragging');
+    for (const id of dragRoots) els.get(id)?.el.classList.add('dragging');
   });
   outline.addEventListener('dragend', () => {
-    els.get(dragId)?.el.classList.remove('dragging');
+    for (const id of dragRoots) els.get(id)?.el.classList.remove('dragging');
     dragId = null;
     indicator.hidden = true;
+    if (holdSelection) { holdSelection = false; if (sel) { paintSelection(); focusSink(); } }
   });
 
   page.addEventListener('dragover', (e) => {
