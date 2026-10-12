@@ -29,7 +29,16 @@ export function createApi() {
     // ---- 認証
     async getUser() {
       const { data } = await sb.auth.getSession();
-      return data.session?.user ?? null;
+      if (data.session?.user) return data.session.user;
+      // オフラインで期限切れの更新ができないときも、保存済みのログイン情報で閲覧はできるようにする
+      if (!navigator.onLine) {
+        try {
+          const ref = new URL(SUPABASE_URL).hostname.split('.')[0];
+          const saved = JSON.parse(localStorage.getItem(`sb-${ref}-auth-token`));
+          return saved?.user ?? null;
+        } catch { return null; }
+      }
+      return null;
     },
     onAuthChange(cb) {
       sb.auth.onAuthStateChange((event, session) => cb(event, session?.user ?? null));
@@ -94,7 +103,7 @@ export function createApi() {
     async loadNodesByIds(ids) {
       const out = [];
       for (let i = 0; i < ids.length; i += 100) {
-        out.push(...must(await sb.from('nodes').select('id,parent_id,content,document_id').in('id', ids.slice(i, i + 100))));
+        out.push(...must(await sb.from('nodes').select('id,parent_id,content,document_id,deleted_at').in('id', ids.slice(i, i + 100))));
       }
       return out;
     },
@@ -108,6 +117,41 @@ export function createApi() {
       return fetchAll(() => sb.from('nodes').select(NODE_COLS.join(','))
         .is('deleted_at', null).is('due_at', null).eq('tags', '{}')
         .or('content.like."*!(*",content.like."*#*",content.like."*@*",note.like."*#*",note.like."*@*"').order('id'));
+    },
+
+    // ---- ゴミ箱
+    async listTrash(since) {
+      const [docs, folders, nodes] = await Promise.all([
+        sb.from('documents').select('id,title,folder_id,deleted_at').not('deleted_at', 'is', null)
+          .gte('deleted_at', since).order('deleted_at', { ascending: false }).limit(300),
+        sb.from('folders').select('id,name,parent_id,deleted_at').not('deleted_at', 'is', null)
+          .gte('deleted_at', since).order('deleted_at', { ascending: false }).limit(300),
+        sb.from('nodes').select('id,document_id,parent_id,content,note,deleted_at,documents!inner(title,deleted_at)')
+          .not('deleted_at', 'is', null).gte('deleted_at', since).is('documents.deleted_at', null)
+          .order('deleted_at', { ascending: false }).limit(3000),
+      ]);
+      return { docs: must(docs), folders: must(folders), nodes: must(nodes) };
+    },
+    // 同じときに削除された(同じ削除日時の)項目
+    loadNodesDeletedAt: (docId, deletedAt) => fetchAll(() => sb.from('nodes').select('id,parent_id')
+      .eq('document_id', docId).eq('deleted_at', deletedAt).order('id')),
+    async restoreRows(table, ids) {
+      for (let i = 0; i < ids.length; i += 100) {
+        must(await sb.from(table).update({ deleted_at: null }).in('id', ids.slice(i, i + 100)));
+      }
+    },
+    async hardDelete(table, ids) {
+      for (let i = 0; i < ids.length; i += 100) {
+        must(await sb.from(table).delete().in('id', ids.slice(i, i + 100)));
+      }
+    },
+    // before より前に削除されたもの(未指定ならすべて)を完全に消す
+    async purgeTrash(before = null) {
+      for (const table of ['nodes', 'documents', 'folders']) {
+        let q = sb.from(table).delete().not('deleted_at', 'is', null);
+        if (before) q = q.lt('deleted_at', before);
+        must(await q);
+      }
     },
 
     // ---- 添付

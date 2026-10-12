@@ -25,7 +25,16 @@ export function createMockApi() {
     .map((n) => ({ ...n, documents: { title: db.documents[n.document_id].title, deleted_at: null } }));
   window.__mockRemote = (table, row) => { upsert(table, row); save(); };
 
-  return {
+  // オフライン(navigator.onLine が false)のときは、本物と同じく通信失敗にする
+  const offlineAware = (apiObj) => new Proxy(apiObj, {
+    get(target, prop) {
+      const v = target[prop];
+      if (typeof v !== 'function' || ['getUser', 'onAuthChange', 'subscribe'].includes(prop)) return v;
+      return (...args) => (navigator.onLine ? v.apply(target, args) : Promise.reject(new TypeError('Failed to fetch')));
+    },
+  });
+
+  return offlineAware({
     getUser: async () => (sessionStorage.getItem('mock.signedOut') ? null : USER),
     onAuthChange() {},
     async signIn() { sessionStorage.removeItem('mock.signedOut'); location.reload(); },
@@ -68,6 +77,31 @@ export function createMockApi() {
       await delay();
     },
     nodesNeedingIndex: () => delay([]),
+    async listTrash(since) {
+      await delay();
+      const byTime = (a, b) => b.deleted_at.localeCompare(a.deleted_at);
+      const docs = Object.values(db.documents).filter((d) => d.deleted_at && d.deleted_at >= since).sort(byTime);
+      const folders = Object.values(db.folders).filter((f) => f.deleted_at && f.deleted_at >= since).sort(byTime);
+      const nodes = Object.values(db.nodes).filter((n) => n.deleted_at && n.deleted_at >= since
+        && db.documents[n.document_id] && !db.documents[n.document_id].deleted_at)
+        .map((n) => ({ ...n, documents: { title: db.documents[n.document_id].title, deleted_at: null } })).sort(byTime);
+      return { docs, folders, nodes };
+    },
+    loadNodesDeletedAt: (docId, at) => delay(Object.values(db.nodes).filter((n) => n.document_id === docId && n.deleted_at === at).map((n) => ({ id: n.id, parent_id: n.parent_id }))),
+    async restoreRows(table, ids) { for (const id of ids) if (db[table][id]) upsert(table, { ...db[table][id], deleted_at: null }); save(); await delay(); },
+    async hardDelete(table, ids) {
+      for (const id of ids) {
+        delete db[table][id];
+        if (table === 'documents') for (const n of Object.values(db.nodes)) if (n.document_id === id) delete db.nodes[n.id];
+      }
+      save(); await delay();
+    },
+    async purgeTrash(before = null) {
+      for (const table of ['nodes', 'documents', 'folders']) {
+        for (const r of Object.values(db[table])) if (r.deleted_at && (!before || r.deleted_at < before)) delete db[table][r.id];
+      }
+      save(); await delay();
+    },
     loadAttachments: (ids) => delay(ids.map((id) => db.attachments[id]).filter(Boolean).map((r) => ({ ...r }))),
     async insertAttachment(row) { db.attachments[row.id] = { user_id: USER.id, ...row }; save(); await delay(); },
     async uploadFile(path, blob) { files.set(path, blob); await delay(); },
@@ -81,5 +115,5 @@ export function createMockApi() {
       setTimeout(() => onStatus?.('SUBSCRIBED'), 10);
       return () => {};
     },
-  };
+  });
 }

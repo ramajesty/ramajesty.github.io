@@ -1,5 +1,6 @@
 // フォルダとドキュメントの一覧(サイドバー)
 import { h, uuid, debounce, bySortKey, choose, popupMenu, toast, generateKeyBetween } from './util.js';
+import { cacheGet, cacheSet } from './cache.js';
 
 let api;
 let ui; // { tree, onOpen, currentDocId }
@@ -17,13 +18,26 @@ export function initLibrary(apiRef, opts) {
   ui = opts;
 }
 
+// 読み込めたら端末にも保存し、読み込めないとき(オフライン)は保存分を使う。保存分を使ったら true
 export async function loadLibrary() {
-  const [fs, ds] = await Promise.all([api.listFolders(), api.listDocuments()]);
+  let fs;
+  let ds;
+  let offline = false;
+  try {
+    [fs, ds] = await Promise.all([api.listFolders(), api.listDocuments()]);
+    cacheSet('library', { folders: fs, docs: ds });
+  } catch (err) {
+    const cached = await cacheGet('library');
+    if (!cached) throw err;
+    ({ folders: fs, docs: ds } = cached);
+    offline = true;
+  }
   folders.clear();
   docs.clear();
   for (const f of fs) folders.set(f.id, f);
   for (const d of ds) docs.set(d.id, d);
   render();
+  return offline;
 }
 
 export const getDoc = (id) => { const d = docs.get(id); return d && !d.deleted_at ? d : undefined; };
@@ -192,7 +206,7 @@ function docMenu(d, e) {
     { label: '上へ', action: () => reorder(list, d, -1, saveDoc) },
     { label: '下へ', action: () => reorder(list, d, 1, saveDoc) },
     { label: '削除', danger: true, action: () => {
-      if (!confirm(`「${d.title || '無題'}」を削除しますか?`)) return;
+      if (!confirm(`「${d.title || '無題'}」をゴミ箱に移しますか?(30日間は元に戻せます)`)) return;
       d.deleted_at = new Date().toISOString();
       saveDoc(d);
       ui.onDeleted?.(d);

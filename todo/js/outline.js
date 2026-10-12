@@ -8,6 +8,7 @@ import {
   attIds, marker, ATT_RE, MD_LINK_RE, hasMdLink,
 } from './content.js';
 import { parseClipboard } from './paste.js';
+import { cacheGet, cacheSet } from './cache.js';
 import { setDueInText, parseDue, toDateValue, extractTags } from './syntax.js';
 import { ensureLoaded, startUpload, handleChipClick } from './attachments.js';
 
@@ -32,6 +33,7 @@ let textSession = null;
 let lastFocus = null;
 let pointerWasFocused = false;
 let lastCompositionEnd = 0;
+let readOnly = false; // オフライン中は閲覧のみ
 
 // ============================================================ 初期化
 
@@ -228,6 +230,7 @@ function afterHistory(focus) {
 
 let dirtySince = 0;
 function markDirty(id) {
+  if (readOnly) return;
   if (!dirty.size) dirtySince = Date.now();
   dirty.add(id);
   ui.onStatus('saving');
@@ -249,6 +252,7 @@ export async function flush() {
   const rows = ids.map((id) => nodes.get(id)).filter(Boolean);
   flushing = api.upsertNodes(rows).then(() => {
     retryDelay = 2000;
+    cacheDocSoon();
     ui.onStatus(dirty.size ? 'saving' : 'saved');
   }, (err) => {
     console.error(err);
@@ -273,6 +277,7 @@ function buildEl(n) {
     h('span', { class: 'cb', role: 'checkbox' }),
     h('div', { class: 'text' }, content, note));
   const kidsEl = h('div', { class: 'kids' });
+  if (readOnly) { content.contentEditable = 'false'; note.contentEditable = 'false'; }
   const el = h('div', { class: 'node', 'data-id': n.id }, row, kidsEl);
   const rec = { el, row, content, note, kidsEl, rendered: false };
   els.set(n.id, rec);
@@ -1202,7 +1207,7 @@ function onFocusOut(e) {
 
 function onKeyDown(e) {
   const t = eventTarget(e);
-  if (!t) return;
+  if (!t || readOnly) return;
   if (e.isComposing || e.keyCode === 229) return;
   if (handleCompleteKey(e)) return;
   const k = e.key;
@@ -1318,6 +1323,7 @@ function onKeyDown(e) {
 function onPaste(e) {
   const t = eventTarget(e);
   if (!t) return;
+  if (readOnly) { e.preventDefault(); return; }
   const dt = e.clipboardData;
   const files = [...(dt?.files || [])];
   e.preventDefault();
@@ -1795,13 +1801,35 @@ export async function openDoc(d, zoom) {
   zoomId = null;
   ui.outline.textContent = '';
   ui.title.textContent = d.title;
-  const rows = await api.loadNodes(d.id);
+  let rows;
+  try {
+    rows = await api.loadNodes(d.id);
+    cacheSet(`doc:${d.id}`, rows);
+  } catch (err) {
+    // オフラインなど: 最後に開いたときの内容を表示する
+    rows = await cacheGet(`doc:${d.id}`);
+    if (!rows) throw err;
+    ui.onOffline?.();
+  }
   if (doc !== d) return;
   nodes = new Map(rows.map((r) => [r.id, r]));
   reindex();
   if (!childrenOf(null).length) create({ parent_id: null, sort_key: 'a0' }) && reindex();
   setZoom(zoom);
   if (!zoom && isTouch()) window.scrollTo(0, 0);
+}
+
+// 編集した内容も、次にオフラインで開いたとき見られるように端末へ保存する
+const cacheDocSoon = debounce(() => {
+  if (!doc) return;
+  cacheSet(`doc:${doc.id}`, [...nodes.values()].filter((n) => !n.deleted_at && n.document_id === doc.id));
+}, 2000);
+
+export function setReadOnly(on) {
+  readOnly = on;
+  for (const el of [ui.title, ui.titleNote]) el.contentEditable = on ? 'false' : 'plaintext-only';
+  if (!on) makeEditable(ui.title), makeEditable(ui.titleNote);
+  if (doc) renderAll();
 }
 
 export const currentDoc = () => doc;
