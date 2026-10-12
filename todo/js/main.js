@@ -5,6 +5,7 @@ import * as library from './library.js';
 import { showShortcuts } from './help.js';
 import * as views from './views.js';
 import { initImporter, showImporter } from './importer.js';
+import { cacheClear } from './cache.js';
 
 const $ = (id) => document.getElementById(id);
 const LAST_DOC_KEY = 'todo.lastDoc';
@@ -110,19 +111,28 @@ async function startApp(user) {
     onStatus: setStatus,
     onTitleChange: () => library.render(),
     onSelection: (count) => onSelectionChange(count),
+    onOffline: enterOffline,
   });
 
-  views.initViews(api, { view: $('view'), crumbs: $('crumbs'), onChanged: () => { viewChanged = true; } });
+  views.initViews(api, {
+    view: $('view'), crumbs: $('crumbs'),
+    onChanged: () => { viewChanged = true; library.loadLibrary().catch(() => {}); },
+  });
   initImporter(api, library, async () => { await library.loadLibrary(); refreshTags(); });
 
   setupChrome(user);
   setupToolbar();
 
   try {
-    await library.loadLibrary();
+    if (await library.loadLibrary()) enterOffline();
   } catch (err) {
     console.error(err);
-    toast('データを読み込めませんでした。Supabase の設定を確認してください', 8000);
+    toast(navigator.onLine ? 'データを読み込めませんでした。Supabase の設定を確認してください' : 'オフラインで、端末に保存された内容もありません', 8000);
+    return;
+  }
+  if (offline) {
+    addEventListener('hashchange', route);
+    await route();
     return;
   }
   api.subscribe((table, row) => {
@@ -141,6 +151,18 @@ async function startApp(user) {
   await route();
   refreshTags();
   backfillIndex();
+  purgeOldTrash();
+}
+
+// ゴミ箱で30日を過ぎたものを完全に削除する(1日1回)
+async function purgeOldTrash() {
+  const KEY = 'todo.purgedOn';
+  const today = new Date().toDateString();
+  try { if (localStorage.getItem(KEY) === today) return; } catch {}
+  try {
+    await api.purgeTrash(new Date(Date.now() - views.TRASH_DAYS * 86400000).toISOString());
+    try { localStorage.setItem(KEY, today); } catch {}
+  } catch (err) { console.error(err); }
 }
 
 // サイドバーのタグ一覧と、入力補完用のタグを読み直す
@@ -161,6 +183,22 @@ async function backfillIndex() {
 }
 
 let viewChanged = false;
+let offline = false;
+
+// 通信できないときは、端末に保存した内容を閲覧のみで表示する
+function enterOffline() {
+  if (offline) return;
+  offline = true;
+  outline.setReadOnly(true);
+  $('offline-banner').hidden = false;
+  document.body.classList.add('offline');
+}
+
+addEventListener('online', () => { if (offline) location.reload(); });
+
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  navigator.serviceWorker.register('sw.js').catch((err) => console.warn('service worker', err));
+}
 
 let routing = Promise.resolve();
 function route() {
@@ -172,14 +210,16 @@ async function doRoute() {
   const hash = location.hash;
   // 検索・期日一覧
   const sm = /^#\/search\/(.*)$/.exec(hash);
-  if (sm || hash === '#/due') {
+  if (sm || hash === '#/due' || hash === '#/trash') {
     await outline.flush();
     closeSidebar();
     showView(true);
+    const name = sm ? 'search' : hash.slice(2);
     if (sm) await views.renderSearch(decodeURIComponent(sm[1]));
-    else await views.renderDue();
-    document.title = `${sm ? '検索' : '期日一覧'} - Outline Todo`;
-    markNav(sm ? 'nav-search' : 'nav-due');
+    else if (name === 'due') await views.renderDue();
+    else await views.renderTrash();
+    document.title = `${{ search: '検索', due: '期日一覧', trash: 'ゴミ箱' }[name]} - Outline Todo`;
+    markNav(`nav-${name}`);
     refreshTags();
     return;
   }
@@ -308,7 +348,7 @@ function setupChrome(user) {
     $('toggle-checked').textContent = d.show_checked ? '完了を隠す' : '完了を表示';
   };
   $('user-email').textContent = user.email ?? '';
-  $('logout').onclick = async () => { await outline.flush(); await api.signOut(); };
+  $('logout').onclick = async () => { await outline.flush(); await cacheClear(); await api.signOut(); };
 
   // 画面左端からのスワイプでサイドバーを開く
   let sx = null;

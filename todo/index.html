@@ -33,6 +33,7 @@
     <nav class="side-nav">
       <a class="tree-item nav-item" id="nav-search" href="#/search/"><span class="nav-icon">🔍</span><span class="tree-label">検索</span></a>
       <a class="tree-item nav-item" id="nav-due" href="#/due"><span class="nav-icon">📅</span><span class="tree-label">期日一覧</span></a>
+      <a class="tree-item nav-item" id="nav-trash" href="#/trash"><span class="nav-icon">🗑</span><span class="tree-label">ゴミ箱</span></a>
     </nav>
     <div class="side-scroll">
       <nav id="tree"></nav>
@@ -54,6 +55,7 @@
       <button id="toggle-checked" class="btn small" type="button">完了を隠す</button>
       <button id="help-btn" class="icon-btn help-btn" type="button" aria-label="ショートカット一覧" title="ショートカット一覧">?</button>
     </header>
+    <div id="offline-banner" hidden>オフライン中です。最後に読み込んだ内容を表示しています(閲覧のみ)。電波が戻ると自動で読み直します。</div>
     <div id="page">
       <h1 id="title" class="title"></h1>
       <div id="title-note" class="title-note" hidden></div>
