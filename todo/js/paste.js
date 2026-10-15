@@ -2,9 +2,11 @@
 // Dynalist などは HTML の入れ子リスト(ul/li)とテキストの字下げの両方で階層を持つので、
 // HTML にリストがあればそれを使い、なければテキストの字下げを読む。
 
+import { oneNoteTitle } from './content.js';
+
 const linkText = (label, href) => {
   label = label.replace(/\s+/g, ' ').trim();
-  if (!/^https?:\/\//.test(href || '')) return label;
+  if (!/^(?:onenote:)?https?:\/\//.test(href || '')) return label;
   if (!label || label === href) return href;
   return `[${label.replace(/[[\]]/g, '')}](${href})`;
 };
@@ -104,6 +106,14 @@ export function parseClipboard(dt) {
   if (items.length === 1) {
     const link = singleLink(html, text);
     if (link) return [{ level: 0, text: link }];
+  }
+  // OneNote の「ページへのリンクをコピー」: ブラウザ用とアプリ用の2行を1つの項目にまとめる
+  const web = items.find((it) => /^https?:\/\/\S+$/.test(it.text));
+  const app = items.find((it) => /^onenote:\S+$/.test(it.text));
+  if (items.length === 2 && web && app) {
+    const title = oneNoteTitle(app.text) || oneNoteTitle(web.text);
+    const clean = (t) => t.replace(/[[\]]/g, ' ');
+    if (title) return [{ level: 0, text: `[📓 ${clean(title)}](${web.text}) [アプリで開く](${app.text})` }];
   }
   if (!items.length && fromList) return fromList;
   return items;

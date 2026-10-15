@@ -1550,6 +1550,8 @@ function dropTarget(e) {
 // アプリ内のリンク(#/d/...)はこの画面で開き、それ以外は新しいタブで開く。
 // 項目へのリンクは Dynalist と同じく、その項目にズームして開く
 export function openLink(href) {
+  // OneNote などのアプリ用リンクは、そのアプリで開く
+  if (/^onenote:/i.test(href)) { location.href = href; return; }
   const base = location.href.split('#')[0];
   const i = href.indexOf('#/');
   const sameApp = href.startsWith(base + '#/') || (i > 0 && href.slice(0, i).replace(/\?.*$/, '') === base.replace(/\?.*$/, ''));
