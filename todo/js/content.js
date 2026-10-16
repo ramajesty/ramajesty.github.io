@@ -6,8 +6,45 @@ import { DATE_RE, TAG_RE, parseDue, formatDue } from './syntax.js';
 
 export const ATT_RE = /\{\{att:([0-9a-f-]{36})\}\}/g;
 // Dynalist と同じ [表示名](URL) 形式のリンク
-export const MD_LINK_RE = /\[([^\[\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
-const URL_RE = /https?:\/\/[^\s<>"'「」、。)）]+/g;
+export const MD_LINK_RE = /\[([^\[\]\n]+)\]\(((?:onenote:)?https?:\/\/[^\s)]+)\)/g;
+const URL_RE = /(?:onenote:)?https?:\/\/[^\s<>"'「」、。)）]+/g;
+
+// OneNote のページへのリンクから、ページ名を取り出す
+export function oneNoteTitle(url) {
+  try {
+    if (/^onenote:/i.test(url)) {
+      // onenote:https://…/ノート.one#ページ名&section-id={…}&page-id={…}&end
+      const i = url.indexOf('#');
+      if (i < 0) return null;
+      const frag = url.slice(i + 1).split(/&(?:section-id|page-id|end)\b/)[0];
+      return decodeURIComponent(frag).trim() || null;
+    }
+    // https://…sharepoint.com/…/Doc.aspx?…&wd=target(ノート.one|セクションID/ページ名|ページID/)
+    const u = new URL(url);
+    const wd = u.searchParams.get('wd');
+    if (!/\.sharepoint\.com$/i.test(u.hostname) || !wd || !wd.startsWith('target(')) return null;
+    const page = wd.slice(7).split('|')[1];
+    const title = page?.slice(page.indexOf('/') + 1).replace(/\\(.)/g, '$1').trim();
+    return title || null;
+  } catch {
+    return null;
+  }
+}
+
+// 長い URL の表示名。短くする必要がなければ null
+export function prettyUrl(url) {
+  const note = oneNoteTitle(url);
+  if (note) return `📓 ${note}`;
+  if (url.length <= 60) return null;
+  try {
+    const u = new URL(url.replace(/^onenote:/i, ''));
+    const last = decodeURIComponent(u.pathname.split('/').filter(Boolean).at(-1) || '');
+    const label = last ? `${u.hostname}/…/${last}` : u.hostname;
+    return label.length > 60 ? `${label.slice(0, 59)}…` : label;
+  } catch {
+    return null;
+  }
+}
 export const marker = (id) => `{{att:${id}}}`;
 
 export function attIds(text) {
@@ -15,7 +52,8 @@ export function attIds(text) {
 }
 
 // 表示用に置き換わる部分([表示名](URL) と期日)があるか。あれば編集中は元の書き方を見せる
-export const hasMdLink = (text) => text.search(MD_LINK_RE) >= 0 || text.search(DATE_RE) >= 0;
+export const hasMdLink = (text) => text.search(MD_LINK_RE) >= 0 || text.search(DATE_RE) >= 0
+  || [...text.matchAll(URL_RE)].some((m) => prettyUrl(m[0]));
 
 // 本文文字列を el の中身として描画する。raw: 編集用に [表示名](URL) をそのまま見せる
 export function renderInto(el, text, { raw = false } = {}) {
@@ -51,7 +89,11 @@ function appendText(el, s) {
   let last = 0;
   for (const m of s.matchAll(URL_RE)) {
     appendDates(el, s.slice(last, m.index));
-    el.append(h('a', { class: 'link', href: m[0], target: '_blank', rel: 'noopener', text: m[0] }));
+    const label = prettyUrl(m[0]);
+    // 長い URL は短い表示名のかたまりにする(編集中は元の URL を見せる)
+    el.append(label
+      ? h('a', { class: 'link', href: m[0], target: '_blank', rel: 'noopener', contenteditable: 'false', 'data-md': m[0], title: m[0], text: label })
+      : h('a', { class: 'link', href: m[0], target: '_blank', rel: 'noopener', text: m[0] }));
     last = m.index + m[0].length;
   }
   appendDates(el, s.slice(last));
